@@ -1,54 +1,171 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity,
-    StyleSheet, TextInput
+    StyleSheet, Image, RefreshControl, ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW } from '../constants/theme';
+import { getTrending, getFeatured, searchBooks } from '../services/openLibrary';
+import { supabase } from '../services/supabase';
 
-const CATEGORIES = ['All', 'Science', 'History', 'Business', 'Fiction', 'Psychology'];
-
-const TRENDING_BOOKS = [
-    { id: 1, title: 'Thinking, Fast and Slow', author: 'Daniel Kahneman', pages: 499, color1: '#2d1b69', color2: '#11998e' },
-    { id: 2, title: 'Sapiens', author: 'Yuval Noah Harari', pages: 443, color1: '#993C1D', color2: '#D85A30' },
-    { id: 3, title: 'Atomic Habits', author: 'James Clear', pages: 320, color1: '#0C447C', color2: '#378ADD' },
-    { id: 4, title: 'Deep Work', author: 'Cal Newport', pages: 296, color1: '#1a1a2e', color2: '#0f3460' },
-];
-
-const MY_UPLOADS = [
-    { id: 1, title: 'Clean Code.pdf', status: 'done' },
-    { id: 2, title: 'DDIA.pdf', status: 'processing' },
-];
+const CATEGORIES = ['All', 'Self Help', 'Fiction', 'Science', 'History', 'Psychology', 'Business'];
+const BOOK_COLORS = ['#2d1b69', '#0c2340', '#0d2e1a', '#2d1515', '#1e1a0c', '#0e1f2d', '#1a0533', '#2a1a00'];
 
 export default function HomeScreen({ navigation }) {
-    const [activeCategory, setActiveCategory] = React.useState('All');
+    const [trending, setTrending] = useState([]);
+    const [featured, setFeatured] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [activeCategory, setActiveCategory] = useState('All');
+    const [userName, setUserName] = useState('Reader');
+
+    useEffect(() => {
+        loadData();
+        loadUser();
+    }, []);
+
+    // Re-fetch when category changes
+    useEffect(() => {
+        if (activeCategory !== 'All') {
+            fetchByCategory(activeCategory);
+        } else {
+            loadData();
+        }
+    }, [activeCategory]);
+
+    const loadUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.email) {
+            setUserName(user.email.split('@')[0]);
+        }
+    };
+
+    const loadData = async () => {
+        setLoading(true);
+        try {
+            const [t, f] = await Promise.all([getTrending(), getFeatured()]);
+            setTrending(t);
+            setFeatured(f);
+        } catch (e) {
+            console.log(e);
+        }
+        setLoading(false);
+    };
+
+    const fetchByCategory = async (category) => {
+        setLoading(true);
+        const queryMap = {
+            'Self Help': 'self improvement habits productivity',
+            'Fiction': 'fiction novel story literature',
+            'Science': 'science physics biology chemistry',
+            'History': 'history world civilization ancient',
+            'Psychology': 'psychology mind behavior human',
+            'Business': 'business entrepreneurship management',
+        };
+        const query = queryMap[category] || category;
+        try {
+            const books = await searchBooks(query, 10);
+            setTrending(books);
+        } catch (e) {
+            console.log(e);
+        }
+        setLoading(false);
+    };
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await loadData();
+        setRefreshing(false);
+    }, []);
+
+    const getGreeting = () => {
+        const h = new Date().getHours();
+        if (h < 12) return 'Good morning';
+        if (h < 17) return 'Good afternoon';
+        return 'Good evening';
+    };
+
+    const BookCard = ({ book, size = 'md' }) => {
+        const colorIndex = book.title.length % BOOK_COLORS.length;
+        const bgColor = BOOK_COLORS[colorIndex];
+        const isLarge = size === 'lg';
+
+        return (
+            <TouchableOpacity
+                style={[styles.bookCard, isLarge && styles.bookCardLg]}
+                onPress={() => navigation.navigate('BookDetail', { book })}
+                activeOpacity={0.85}
+            >
+                <View style={[styles.bookCover, isLarge && styles.bookCoverLg, { backgroundColor: bgColor }]}>
+                    {book.coverUrl ? (
+                        <Image
+                            source={{ uri: book.coverUrl }}
+                            style={styles.coverImg}
+                            resizeMode="cover"
+                        />
+                    ) : (
+                        <View style={styles.coverPlaceholder}>
+                            <Text style={styles.coverInitial}>{book.title[0]}</Text>
+                        </View>
+                    )}
+                    {book.isFree && (
+                        <View style={styles.freeBadge}>
+                            <Text style={styles.freeBadgeText}>Free</Text>
+                        </View>
+                    )}
+                </View>
+                <Text style={styles.bookTitle} numberOfLines={2}>{book.title}</Text>
+                <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
+                {book.rating && book.rating !== '—' && (
+                    <View style={styles.ratingRow}>
+                        <Ionicons name="star" size={10} color="#f59e0b" />
+                        <Text style={styles.ratingText}>{book.rating}</Text>
+                    </View>
+                )}
+            </TouchableOpacity>
+        );
+    };
 
     return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-
+        <ScrollView
+            style={styles.container}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
             {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerTop}>
                     <View>
-                        <Text style={styles.greeting}>Good morning 👋</Text>
-                        <Text style={styles.username}>Muhammad</Text>
+                        <Text style={styles.greeting}>{getGreeting()} 👋</Text>
+                        <Text style={styles.userName}>{userName}</Text>
                     </View>
-                    <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>MU</Text>
+                    <View style={styles.headerActions}>
+                        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Search')}>
+                            <Ionicons name="search-outline" size={20} color="rgba(255,255,255,0.8)" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.avatar}>
+                            <Text style={styles.avatarText}>{userName[0]?.toUpperCase()}</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
-                <View style={styles.searchBar}>
-                    <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.4)" />
-                    <Text style={styles.searchText}>Search books, authors...</Text>
-                </View>
+
+                {/* Search Bar */}
+                <TouchableOpacity
+                    style={styles.searchBar}
+                    onPress={() => { }}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="search-outline" size={15} color="rgba(255,255,255,0.4)" />
+                    <Text style={styles.searchText}>Search 20M+ books from Open Library...</Text>
+                </TouchableOpacity>
             </View>
 
             {/* Categories */}
             <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                style={styles.catsScroll}
                 contentContainerStyle={styles.catsContent}
+                style={styles.catsScroll}
             >
                 {CATEGORIES.map(cat => (
                     <TouchableOpacity
@@ -56,95 +173,117 @@ export default function HomeScreen({ navigation }) {
                         style={[styles.catPill, activeCategory === cat && styles.catPillActive]}
                         onPress={() => setActiveCategory(cat)}
                     >
-                        <Text style={[styles.catText, activeCategory === cat && styles.catTextActive]}>
-                            {cat}
-                        </Text>
+                        <Text style={[styles.catText, activeCategory === cat && styles.catTextActive]}>{cat}</Text>
                     </TouchableOpacity>
                 ))}
             </ScrollView>
 
-            {/* Featured Book */}
-            <View style={styles.featured}>
+            {/* Featured Banner */}
+            <View style={styles.featuredBanner}>
                 <View>
                     <Text style={styles.featuredLabel}>Featured today</Text>
-                    <Text style={styles.featuredTitle}>Atomic Habits</Text>
-                    <Text style={styles.featuredAuthor}>James Clear · 4 min read</Text>
+                    <Text style={styles.featuredTitle}>Open Library</Text>
+                    <Text style={styles.featuredSub}>20M+ free books · No signup required</Text>
                 </View>
                 <TouchableOpacity
                     style={styles.featuredBtn}
-                    onPress={() => navigation.navigate('BookDetail')}
+                    onPress={() => navigation.navigate('Library')}
                 >
-                    <Text style={styles.featuredBtnText}>Read now</Text>
+                    <Text style={styles.featuredBtnText}>Explore</Text>
                 </TouchableOpacity>
+            </View>
+
+            {/* AI Card */}
+            <View style={styles.aiCard}>
+                <View style={styles.aiHeader}>
+                    <View style={styles.aiIcon}>
+                        <Text>🤖</Text>
+                    </View>
+                    <Text style={styles.aiTitle}>AI Book Assistant</Text>
+                    <View style={styles.aiBadge}>
+                        <Text style={styles.aiBadgeText}>Claude AI</Text>
+                    </View>
+                </View>
+                <Text style={styles.aiText}>
+                    Upload any book and get a complete AI-powered summary in minutes. Every chapter summarized in simple English — no important concept skipped.
+                </Text>
+                <View style={styles.aiActions}>
+                    <TouchableOpacity
+                        style={styles.aiBtn}
+                        onPress={() => navigation.navigate('Upload')}
+                    >
+                        <Text style={styles.aiBtnText}>📤 Upload Book</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.aiBtn, styles.aiBtnPrimary]}
+                        onPress={() => navigation.navigate('Library')}
+                    >
+                        <Text style={[styles.aiBtnText, { color: '#fff' }]}>🔮 Explore</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Trending Books */}
-            <Text style={styles.sectionTitle}>Trending Books</Text>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.booksRow}
-            >
-                {TRENDING_BOOKS.map(book => (
-                    <TouchableOpacity
-                        key={book.id}
-                        style={styles.bookCard}
-                        onPress={() => navigation.navigate('BookDetail', { book })}
-                    >
-                        <View style={[styles.bookCover, { backgroundColor: book.color1 }]}>
-                            <View style={[styles.bookCoverAccent, { backgroundColor: book.color2 }]} />
-                            <Text style={styles.bookCoverTitle} numberOfLines={3}>{book.title}</Text>
-                        </View>
-                        <Text style={styles.bookTitle} numberOfLines={1}>{book.title}</Text>
-                        <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
-
-            {/* My Uploads */}
-            <View style={styles.sectionRow}>
-                <Text style={styles.sectionTitle}>My Uploads</Text>
-                <TouchableOpacity onPress={() => navigation.navigate('Upload')}>
-                    <Text style={styles.seeAll}>+ Add new</Text>
+            <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Trending Books</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('Library')}>
+                    <Text style={styles.seeAll}>See all</Text>
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.uploadsRow}>
-                {MY_UPLOADS.map(upload => (
-                    <View key={upload.id} style={styles.uploadCard}>
-                        <Text style={styles.uploadTitle} numberOfLines={1}>{upload.title}</Text>
-                        <Text style={[
-                            styles.uploadStatus,
-                            { color: upload.status === 'done' ? COLORS.success : COLORS.warning }
-                        ]}>
-                            {upload.status === 'done' ? 'Summary ready' : 'Processing...'}
-                        </Text>
-                    </View>
-                ))}
+            {loading ? (
+                <View style={styles.loadingRow}>
+                    <ActivityIndicator color={COLORS.primary} />
+                    <Text style={styles.loadingText}>Fetching from Open Library...</Text>
+                </View>
+            ) : (
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.booksRow}
+                >
+                    {trending.map((book, i) => (
+                        <BookCard key={book.id || i} book={book} />
+                    ))}
+                </ScrollView>
+            )}
+
+            {/* Free Classics */}
+            <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Free Classics</Text>
+                <TouchableOpacity>
+                    <Text style={styles.seeAll}>Browse all</Text>
+                </TouchableOpacity>
             </View>
 
-            {/* Recently Added */}
-            <Text style={styles.sectionTitle}>Recently Added</Text>
-            <View style={styles.listContainer}>
-                {TRENDING_BOOKS.slice(0, 3).map(book => (
-                    <TouchableOpacity
-                        key={book.id}
-                        style={styles.listItem}
-                        onPress={() => navigation.navigate('BookDetail', { book })}
-                    >
-                        <View style={[styles.listCover, { backgroundColor: book.color1 }]}>
-                            <Text style={styles.listCoverText} numberOfLines={1}>{book.title[0]}</Text>
-                        </View>
-                        <View style={styles.listInfo}>
-                            <Text style={styles.listTitle} numberOfLines={1}>{book.title}</Text>
-                            <Text style={styles.listAuthor}>{book.author}</Text>
-                            <Text style={styles.listPages}>{book.pages} pages</Text>
-                        </View>
-                        <View style={styles.listBadge}>
-                            <Text style={styles.listBadgeText}>Free</Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
-                    </TouchableOpacity>
+            {loading ? (
+                <View style={styles.loadingRow}>
+                    <ActivityIndicator color={COLORS.primary} />
+                </View>
+            ) : (
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.booksRow}
+                >
+                    {featured.map((book, i) => (
+                        <BookCard key={book.id || i} book={book} />
+                    ))}
+                </ScrollView>
+            )}
+
+            {/* Stats Bar */}
+            <View style={styles.statsBar}>
+                {[
+                    { icon: '📚', value: '20M+', label: 'Books' },
+                    { icon: '🤖', value: 'AI', label: 'Summaries' },
+                    { icon: '📴', value: 'Free', label: 'Forever' },
+                ].map((s, i) => (
+                    <View key={i} style={styles.statItem}>
+                        <Text style={styles.statIcon}>{s.icon}</Text>
+                        <Text style={styles.statValue}>{s.value}</Text>
+                        <Text style={styles.statLabel}>{s.label}</Text>
+                    </View>
                 ))}
             </View>
 
@@ -156,61 +295,68 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: COLORS.background },
 
-    // Header
-    header: { backgroundColor: COLORS.primary, paddingTop: 52, paddingBottom: 20, paddingHorizontal: 20 },
-    headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+    header: { backgroundColor: COLORS.primary, paddingTop: 52, paddingBottom: 18, paddingHorizontal: 18 },
+    headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
     greeting: { fontSize: 12, color: 'rgba(255,255,255,0.5)' },
-    username: { fontSize: 20, fontWeight: '600', color: '#fff', marginTop: 2 },
-    avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-    avatarText: { fontSize: 13, fontWeight: '600', color: '#fff' },
-    searchBar: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: RADIUS.md, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
-    searchText: { fontSize: 13, color: 'rgba(255,255,255,0.4)' },
+    userName: { fontSize: 20, fontWeight: '700', color: '#fff', marginTop: 2 },
+    headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+    avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center' },
+    avatarText: { fontSize: 14, fontWeight: '700', color: COLORS.primary },
+    searchBar: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: RADIUS.md, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    searchText: { fontSize: 12, color: 'rgba(255,255,255,0.4)', flex: 1 },
 
-    // Categories
-    catsScroll: { marginTop: 14 },
-    catsContent: { paddingHorizontal: 16, gap: 8 },
-    catPill: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: RADIUS.full, borderWidth: 0.5, borderColor: COLORS.border, backgroundColor: COLORS.white },
+    catsScroll: { backgroundColor: COLORS.white, borderBottomWidth: 0.5, borderBottomColor: COLORS.border },
+    catsContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+    catPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, borderWidth: 0.5, borderColor: COLORS.border, backgroundColor: COLORS.background },
     catPillActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
     catText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
     catTextActive: { color: '#fff' },
 
-    // Featured
-    featured: { margin: 16, backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, padding: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    featuredLabel: { fontSize: 10, color: 'rgba(255,255,255,0.45)', marginBottom: 4 },
-    featuredTitle: { fontSize: 16, fontWeight: '600', color: '#fff', marginBottom: 3 },
-    featuredAuthor: { fontSize: 11, color: 'rgba(255,255,255,0.5)' },
-    featuredBtn: { backgroundColor: COLORS.accent, borderRadius: RADIUS.sm, paddingHorizontal: 14, paddingVertical: 8 },
-    featuredBtnText: { fontSize: 12, fontWeight: '600', color: COLORS.primary },
+    featuredBanner: { margin: 16, backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    featuredLabel: { fontSize: 10, color: 'rgba(255,255,255,0.5)', marginBottom: 3 },
+    featuredTitle: { fontSize: 16, fontWeight: '700', color: '#fff', marginBottom: 2 },
+    featuredSub: { fontSize: 11, color: 'rgba(255,255,255,0.5)' },
+    featuredBtn: { backgroundColor: COLORS.accent, borderRadius: RADIUS.md, paddingHorizontal: 14, paddingVertical: 8 },
+    featuredBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
 
-    // Section
-    sectionTitle: { fontSize: 15, fontWeight: '600', color: COLORS.text, paddingHorizontal: 16, marginBottom: 12, marginTop: 4 },
-    sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: 16, marginTop: 4 },
-    seeAll: { fontSize: 12, color: COLORS.success, fontWeight: '500' },
+    aiCard: { margin: 16, backgroundColor: 'rgba(26,26,46,0.05)', borderRadius: RADIUS.lg, padding: 16, borderWidth: 1, borderColor: `${COLORS.primary}30` },
+    aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+    aiIcon: { width: 28, height: 28, borderRadius: 8, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
+    aiTitle: { fontSize: 14, fontWeight: '700', color: COLORS.text, flex: 1 },
+    aiBadge: { backgroundColor: `${COLORS.primary}15`, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+    aiBadgeText: { fontSize: 10, color: COLORS.primary, fontWeight: '600' },
+    aiText: { fontSize: 12, color: COLORS.textMuted, lineHeight: 18, marginBottom: 12 },
+    aiActions: { flexDirection: 'row', gap: 8 },
+    aiBtn: { flex: 1, padding: 9, borderRadius: RADIUS.md, backgroundColor: COLORS.background, borderWidth: 0.5, borderColor: COLORS.border, alignItems: 'center' },
+    aiBtnPrimary: { backgroundColor: COLORS.primary },
+    aiBtnText: { fontSize: 12, fontWeight: '600', color: COLORS.text },
 
-    // Book cards
-    booksRow: { paddingHorizontal: 16, gap: 12, paddingBottom: 4 },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12, marginTop: 4 },
+    sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+    seeAll: { fontSize: 12, color: COLORS.success, fontWeight: '600' },
+
+    loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 20 },
+    loadingText: { fontSize: 12, color: COLORS.textMuted },
+
+    booksRow: { paddingHorizontal: 16, gap: 12, paddingBottom: 8 },
     bookCard: { width: 110 },
-    bookCover: { height: 148, borderRadius: RADIUS.md, padding: 10, justifyContent: 'flex-end', overflow: 'hidden', ...SHADOW.small },
-    bookCoverAccent: { position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, opacity: 0.4 },
-    bookCoverTitle: { fontSize: 10, color: '#fff', fontWeight: '600', lineHeight: 14 },
-    bookTitle: { fontSize: 11, color: COLORS.text, marginTop: 7, fontWeight: '500' },
-    bookAuthor: { fontSize: 10, color: COLORS.textMuted, marginTop: 2 },
+    bookCardLg: { width: 140 },
+    bookCover: { height: 150, borderRadius: RADIUS.md, marginBottom: 8, overflow: 'hidden', ...SHADOW.small },
+    bookCoverLg: { height: 190 },
+    coverImg: { width: '100%', height: '100%' },
+    coverPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    coverInitial: { fontSize: 36, fontWeight: '700', color: 'rgba(255,255,255,0.3)' },
+    freeBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+    freeBadgeText: { fontSize: 9, fontWeight: '700', color: '#fff' },
+    bookTitle: { fontSize: 12, fontWeight: '600', color: COLORS.text, lineHeight: 16 },
+    bookAuthor: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+    ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
+    ratingText: { fontSize: 10, color: COLORS.textMuted },
 
-    // Uploads
-    uploadsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 20 },
-    uploadCard: { flex: 1, backgroundColor: COLORS.white, borderRadius: RADIUS.md, padding: 12, borderWidth: 0.5, borderColor: COLORS.border, ...SHADOW.small },
-    uploadTitle: { fontSize: 12, color: COLORS.text, fontWeight: '500', marginBottom: 4 },
-    uploadStatus: { fontSize: 11 },
-
-    // List
-    listContainer: { paddingHorizontal: 16, gap: 2, marginBottom: 8 },
-    listItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.white, padding: 12, borderRadius: RADIUS.md, marginBottom: 8, borderWidth: 0.5, borderColor: COLORS.border, ...SHADOW.small },
-    listCover: { width: 44, height: 52, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' },
-    listCoverText: { fontSize: 20, color: '#fff', fontWeight: '700' },
-    listInfo: { flex: 1 },
-    listTitle: { fontSize: 13, fontWeight: '500', color: COLORS.text },
-    listAuthor: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
-    listPages: { fontSize: 10, color: COLORS.textMuted, marginTop: 2 },
-    listBadge: { backgroundColor: COLORS.successLight, borderRadius: RADIUS.full, paddingHorizontal: 8, paddingVertical: 3 },
-    listBadgeText: { fontSize: 10, color: COLORS.success, fontWeight: '500' },
+    statsBar: { flexDirection: 'row', margin: 16, backgroundColor: COLORS.white, borderRadius: RADIUS.lg, borderWidth: 0.5, borderColor: COLORS.border, overflow: 'hidden' },
+    statItem: { flex: 1, alignItems: 'center', paddingVertical: 14, borderRightWidth: 0.5, borderRightColor: COLORS.border },
+    statIcon: { fontSize: 18, marginBottom: 4 },
+    statValue: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+    statLabel: { fontSize: 10, color: COLORS.textMuted, marginTop: 1 },
 });

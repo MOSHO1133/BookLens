@@ -12,6 +12,7 @@ import UploadScreen from '../screens/UploadScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import BookDetailScreen from '../screens/BookDetailScreen';
 import SummaryScreen from '../screens/SummaryScreen';
+import ReaderScreen from '../screens/ReaderScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -58,6 +59,7 @@ export default function AppNavigator() {
                 <Stack.Screen name="Main" component={MainTabs} />
                 <Stack.Screen name="BookDetail" component={BookDetailScreen} />
                 <Stack.Screen name="Summary" component={SummaryScreen} />
+                <Stack.Screen name="Reader" component={ReaderScreen} />
             </Stack.Navigator>
         </NavigationContainer>
     );

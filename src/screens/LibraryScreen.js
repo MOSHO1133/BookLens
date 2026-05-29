@@ -1,128 +1,284 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
+import {
+    View,
+    Text,
+    TextInput,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    Image
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, RADIUS, SHADOW } from '../constants/theme';
-
-const ALL_BOOKS = [
-    { id: 1, title: 'Thinking, Fast and Slow', author: 'Daniel Kahneman', pages: 499, category: 'Psychology', color1: '#2d1b69', color2: '#11998e' },
-    { id: 2, title: 'Sapiens', author: 'Yuval Noah Harari', pages: 443, category: 'History', color1: '#993C1D', color2: '#D85A30' },
-    { id: 3, title: 'Atomic Habits', author: 'James Clear', pages: 320, category: 'Business', color1: '#0C447C', color2: '#378ADD' },
-    { id: 4, title: 'Deep Work', author: 'Cal Newport', pages: 296, category: 'Business', color1: '#1a1a2e', color2: '#0f3460' },
-    { id: 5, title: 'The Selfish Gene', author: 'Richard Dawkins', pages: 360, category: 'Science', color1: '#0f6e56', color2: '#4ade80' },
-    { id: 6, title: 'A Brief History of Time', author: 'Stephen Hawking', pages: 212, category: 'Science', color1: '#854F0B', color2: '#EF9F27' },
-    { id: 7, title: 'Meditations', author: 'Marcus Aurelius', pages: 254, category: 'Philosophy', color1: '#533489', color2: '#7F77DD' },
-    { id: 8, title: 'The Art of War', author: 'Sun Tzu', pages: 68, category: 'Philosophy', color1: '#993556', color2: '#D4537E' },
-];
-
-const CATEGORIES = ['All', 'Psychology', 'History', 'Business', 'Science', 'Philosophy'];
 
 export default function LibraryScreen({ navigation }) {
-    const [search, setSearch] = useState('');
-    const [activeCategory, setActiveCategory] = useState('All');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [activeTab, setActiveTab] = useState('Reading');
 
-    const filtered = ALL_BOOKS.filter(book => {
-        const matchCat = activeCategory === 'All' || book.category === activeCategory;
-        const matchSearch = book.title.toLowerCase().includes(search.toLowerCase()) ||
-            book.author.toLowerCase().includes(search.toLowerCase());
-        return matchCat && matchSearch;
-    });
+    const tabs = ['All', 'Reading', 'Completed', 'Wishlist', 'Uploads'];
+
+    const libraryBooks = [
+        {
+            id: '1',
+            title: 'Le parfum des fleurs la nuit',
+            author: 'Leïla Slimani',
+            status: 'Reading',
+            coverUrl: 'https://covers.openlibrary.org/b/id/12567302-M.jpg'
+        }
+    ];
+
+    const filteredBooks = libraryBooks.filter(
+        book => book.status === activeTab || activeTab === 'All'
+    );
 
     return (
         <View style={styles.container}>
 
-            {/* Header */}
+            {/* Dark Navy Header (Sharp Edges) */}
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Library</Text>
-                <Text style={styles.headerSub}>{ALL_BOOKS.length} books available</Text>
+                <Text style={styles.headerSub}>20M+ books via Open Library</Text>
+
                 <View style={styles.searchBar}>
-                    <Ionicons name="search-outline" size={16} color="rgba(255,255,255,0.4)" />
+                    <Ionicons name="search" size={16} color="rgba(255,255,255,0.4)" style={styles.searchIcon} />
                     <TextInput
-                        style={styles.searchInput}
                         placeholder="Search books, authors..."
-                        placeholderTextColor="rgba(255,255,255,0.3)"
-                        value={search}
-                        onChangeText={setSearch}
+                        placeholderTextColor="rgba(255,255,255,0.4)"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        style={styles.searchInput}
                     />
-                    {search.length > 0 && (
-                        <TouchableOpacity onPress={() => setSearch('')}>
-                            <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.4)" />
-                        </TouchableOpacity>
-                    )}
                 </View>
             </View>
 
-            {/* Categories */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.catsScroll}
-                contentContainerStyle={styles.catsContent}
-            >
-                {CATEGORIES.map(cat => (
-                    <TouchableOpacity
-                        key={cat}
-                        style={[styles.catPill, activeCategory === cat && styles.catPillActive]}
-                        onPress={() => setActiveCategory(cat)}
-                    >
-                        <Text style={[styles.catText, activeCategory === cat && styles.catTextActive]}>{cat}</Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+            {/* Category Filter Pills Container */}
+            <View style={styles.tabContainer}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.tabScroll}
+                >
+                    {tabs.map(tab => {
+                        const isSelected = activeTab === tab;
+                        return (
+                            <TouchableOpacity
+                                key={tab}
+                                style={[
+                                    styles.tabPill,
+                                    isSelected ? styles.tabPillActive : styles.tabPillInactive
+                                ]}
+                                onPress={() => setActiveTab(tab)}
+                            >
+                                <Text style={[
+                                    styles.tabPillText,
+                                    isSelected ? styles.tabPillTextActive : styles.tabPillTextInactive
+                                ]}>
+                                    {tab}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+            </View>
 
-            {/* Results count */}
-            <Text style={styles.resultCount}>{filtered.length} books</Text>
-
-            {/* Book Grid */}
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.grid}>
-                {filtered.map(book => (
-                    <TouchableOpacity
-                        key={book.id}
-                        style={styles.bookCard}
-                        onPress={() => navigation.navigate('BookDetail', { book })}
-                    >
-                        <View style={[styles.bookCover, { backgroundColor: book.color1 }]}>
-                            <View style={[styles.coverAccent, { backgroundColor: book.color2 }]} />
-                            <Text style={styles.coverTitle} numberOfLines={3}>{book.title}</Text>
-                        </View>
-                        <Text style={styles.bookTitle} numberOfLines={2}>{book.title}</Text>
-                        <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
-                        <View style={styles.bookMeta}>
-                            <Text style={styles.bookPages}>{book.pages}p</Text>
-                            <View style={styles.freeBadge}>
-                                <Text style={styles.freeBadgeText}>Free</Text>
+            {/* Main Content List Area */}
+            <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+                {filteredBooks.length > 0 ? (
+                    filteredBooks.map(book => (
+                        <TouchableOpacity
+                            key={book.id}
+                            style={styles.bookRow}
+                            onPress={() => navigation && navigation.navigate('BookDetail', { book })}
+                        >
+                            <Image source={{ uri: book.coverUrl }} style={styles.coverImage} resizeMode="cover" />
+                            <View style={styles.bookInfo}>
+                                <Text style={styles.bookTitle} numberOfLines={1}>{book.title}</Text>
+                                <Text style={styles.bookAuthor}>{book.author}</Text>
+                                <View style={styles.statusBadge}>
+                                    <Text style={styles.statusText}>{book.status}</Text>
+                                </View>
                             </View>
-                        </View>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+                        </TouchableOpacity>
+                    ))
+                ) : (
+                    /* Original Empty State View Layout */
+                    <View style={styles.emptyContainer}>
+                        <Image
+                            source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3429/3429149.png' }}
+                            style={styles.emptyImage}
+                        />
+                        <Text style={styles.emptyTitle}>No books here yet</Text>
+                        <Text style={styles.emptySub}>Search and save books to your library</Text>
 
+                        <TouchableOpacity
+                            style={styles.browseBtn}
+                            onPress={() => navigation && navigation.navigate('Home')}
+                        >
+                            <Text style={styles.browseBtnText}>Browse Books</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </ScrollView>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.background },
-    header: { backgroundColor: COLORS.primary, paddingTop: 52, paddingBottom: 16, paddingHorizontal: 20 },
-    headerTitle: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 3 },
-    headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.45)', marginBottom: 14 },
-    searchBar: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: RADIUS.md, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
-    searchInput: { flex: 1, fontSize: 13, color: '#fff', outlineStyle: 'none' },
-    catsScroll: { backgroundColor: COLORS.white, borderBottomWidth: 0.5, borderBottomColor: COLORS.border },
-    catsContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-    catPill: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: RADIUS.full, borderWidth: 0.5, borderColor: COLORS.border, backgroundColor: COLORS.background },
-    catPillActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-    catText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
-    catTextActive: { color: '#fff' },
-    resultCount: { fontSize: 12, color: COLORS.textMuted, paddingHorizontal: 16, paddingVertical: 10 },
-    grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 12, paddingBottom: 30 },
-    bookCard: { width: '46%', backgroundColor: COLORS.white, borderRadius: RADIUS.lg, overflow: 'hidden', borderWidth: 0.5, borderColor: COLORS.border, ...SHADOW.small },
-    bookCover: { height: 130, padding: 12, justifyContent: 'flex-end', overflow: 'hidden' },
-    coverAccent: { position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: 50, opacity: 0.35 },
-    coverTitle: { fontSize: 11, color: '#fff', fontWeight: '600', lineHeight: 15 },
-    bookTitle: { fontSize: 12, fontWeight: '600', color: COLORS.text, padding: 10, paddingBottom: 3 },
-    bookAuthor: { fontSize: 11, color: COLORS.textMuted, paddingHorizontal: 10 },
-    bookMeta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, paddingTop: 6 },
-    bookPages: { fontSize: 10, color: COLORS.textMuted },
-    freeBadge: { backgroundColor: COLORS.successLight, borderRadius: RADIUS.full, paddingHorizontal: 8, paddingVertical: 2 },
-    freeBadgeText: { fontSize: 10, color: COLORS.success, fontWeight: '600' },
+    container: {
+        flex: 1,
+        backgroundColor: '#ffffff'
+    },
+    header: {
+        backgroundColor: '#1b183a',
+        paddingHorizontal: 20,
+        paddingTop: 30,
+        paddingBottom: 25
+    },
+    headerTitle: {
+        fontSize: 26,
+        fontWeight: '700',
+        color: '#ffffff',
+        marginBottom: 4
+    },
+    headerSub: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.5)',
+        marginBottom: 16
+    },
+    searchBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: 42,
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderRadius: 8,
+        paddingHorizontal: 12
+    },
+    searchIcon: {
+        marginRight: 8
+    },
+    searchInput: {
+        flex: 1,
+        fontSize: 14,
+        color: '#ffffff',
+        padding: 0
+    },
+
+    tabContainer: {
+        paddingVertical: 14,
+        backgroundColor: '#ffffff'
+    },
+    tabScroll: {
+        paddingHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center'
+    },
+    tabPill: {
+        paddingHorizontal: 16,
+        height: 36,               // FIXED: Explicit height rule prevents layout engines from stretching the pills
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 18,
+        borderWidth: 1,
+        marginRight: 8,
+        alignSelf: 'center'
+    },
+    tabPillActive: {
+        backgroundColor: '#1b183a',
+        borderColor: '#1b183a'
+    },
+    tabPillInactive: {
+        backgroundColor: '#ffffff',
+        borderColor: '#e2e8f0'
+    },
+    tabPillText: {
+        fontSize: 13,
+        fontWeight: '500'
+    },
+    tabPillTextActive: {
+        color: '#ffffff',
+        fontWeight: '600'
+    },
+    tabPillTextInactive: {
+        color: '#64748b'
+    },
+
+    scrollBody: {
+        flexGrow: 1,
+        paddingHorizontal: 16
+    },
+    bookRow: {
+        flexDirection: 'row',
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f1f5f9',
+        alignItems: 'center'
+    },
+    coverImage: {
+        width: 42,
+        height: 58,
+        borderRadius: 4,
+        marginRight: 14
+    },
+    bookInfo: {
+        flex: 1,
+        justifyContent: 'center'
+    },
+    bookTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#0f172a',
+        marginBottom: 2
+    },
+    bookAuthor: {
+        fontSize: 13,
+        color: '#64748b',
+        marginBottom: 6
+    },
+    statusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        backgroundColor: '#e2e8f0',
+        alignSelf: 'flex-start'
+    },
+    statusText: {
+        fontSize: 11,
+        fontWeight: '500',
+        color: '#475569'
+    },
+
+    emptyContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: 50,
+        paddingHorizontal: 40
+    },
+    emptyImage: {
+        width: 64,
+        height: 64,
+        marginBottom: 16
+    },
+    emptyTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#0f172a',
+        marginBottom: 6
+    },
+    emptySub: {
+        fontSize: 13,
+        color: '#64748b',
+        textAlign: 'center',
+        marginBottom: 20
+    },
+    browseBtn: {
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderRadius: 6,
+        backgroundColor: '#1b183a'
+    },
+    browseBtnText: {
+        color: '#ffffff',
+        fontSize: 14,
+        fontWeight: '600'
+    }
 });
