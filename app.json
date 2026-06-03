@@ -29,6 +29,9 @@
     "plugins": [
       "expo-web-browser",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "anthropicKey": "sk-ant-api03-PASTE-YOUR-KEY-HERE"
+    }
   }
 }
