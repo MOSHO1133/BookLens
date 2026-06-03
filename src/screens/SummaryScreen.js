@@ -1,4 +1,4 @@
-import { ANTHROPIC_KEY } from '../constants/config';
+import { GROK_KEY } from '../constants/config';
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity,
@@ -67,17 +67,15 @@ Return ONLY a valid JSON object with NO markdown fences, NO extra text:
 Generate exactly 4 keyPoints. Be completely specific to Chapter ${chapter.num}: "${chapter.title}" of "${book.title}". Each chapter has DIFFERENT content — do not repeat the same points across chapters.
 `.trim();
 
-const callClaudeAPI = async (prompt) => {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+const callGrokAPI = async (prompt) => {
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true',
+            'Authorization': `Bearer ${GROK_KEY}`,
         },
         body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: 'grok-3',
             max_tokens: 2500,
             messages: [{ role: 'user', content: prompt }],
         }),
@@ -89,7 +87,7 @@ const callClaudeAPI = async (prompt) => {
     }
 
     const data = await res.json();
-    const raw = data.content?.[0]?.text || '';
+    const raw = data.choices[0].message.content || '';
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
     return JSON.parse(clean);
 };
@@ -167,7 +165,7 @@ export default function SummaryScreen({ navigation, route }) {
             const prompt = chapter
                 ? buildChapterPrompt(book, chapter)
                 : buildFullPrompt(book);
-            return await callClaudeAPI(prompt);
+            return await callGrokAPI(prompt);
         })();
 
         await stepPromise;
@@ -176,7 +174,7 @@ export default function SummaryScreen({ navigation, route }) {
             const parsed = await apiPromise;
             setSummary(parsed);
         } catch (e) {
-            console.log('Claude API error:', e.message);
+            console.log('Grok API error:', e.message);
             setSummary(chapter ? getChapterFallback(book, chapter) : getBookFallback(book));
         }
 
@@ -337,7 +335,6 @@ export default function SummaryScreen({ navigation, route }) {
                 </View>
             </View>
 
-            {/* Simple / Detailed toggle */}
             <View style={s.toggleBar}>
                 <Text style={s.toggleLabel}>Reading level</Text>
                 <View style={s.toggleGroup}>
@@ -356,7 +353,6 @@ export default function SummaryScreen({ navigation, route }) {
                 </View>
             </View>
 
-            {/* Tabs */}
             <View style={s.tabBar}>
                 {tabs.map(t => (
                     <TouchableOpacity
@@ -374,7 +370,6 @@ export default function SummaryScreen({ navigation, route }) {
             <ScrollView showsVerticalScrollIndicator={false}>
                 <Animated.View style={[s.summaryBody, { opacity: fadeAnim }]}>
 
-                    {/* ── Overview ── */}
                     {activeTab === 'overview' && summary && (
                         <>
                             <View style={s.readTimeRow}>
@@ -402,7 +397,6 @@ export default function SummaryScreen({ navigation, route }) {
                         </>
                     )}
 
-                    {/* ── Key Ideas ── */}
                     {activeTab === 'keyIdeas' && summary && (
                         <>
                             <Text style={s.tabIntroText}>
@@ -427,7 +421,6 @@ export default function SummaryScreen({ navigation, route }) {
                         </>
                     )}
 
-                    {/* ── About ── */}
                     {activeTab === 'about' && summary && (
                         <>
                             <View style={s.aboutCard}>
@@ -461,7 +454,6 @@ export default function SummaryScreen({ navigation, route }) {
 const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: COLORS.background },
 
-    // Loading
     loadHeader: {
         backgroundColor: COLORS.primary,
         paddingTop: 52, paddingBottom: 16, paddingHorizontal: 16,
@@ -494,7 +486,6 @@ const s = StyleSheet.create({
     stepDone: { color: '#10b981' },
     stepActive: { color: COLORS.text, fontWeight: '600' },
 
-    // Header
     header: {
         backgroundColor: COLORS.primary,
         paddingTop: 52, paddingBottom: 16, paddingHorizontal: 16,
@@ -510,7 +501,6 @@ const s = StyleSheet.create({
     },
     aiBadgeText: { fontSize: 11, color: '#fff', fontWeight: '600' },
 
-    // Toggle
     toggleBar: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         paddingHorizontal: 16, paddingVertical: 10,
@@ -526,7 +516,6 @@ const s = StyleSheet.create({
     toggleText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
     toggleTextOn: { color: '#fff' },
 
-    // Tabs
     tabBar: {
         flexDirection: 'row', backgroundColor: '#fff',
         borderBottomWidth: 0.5, borderBottomColor: COLORS.border,
@@ -536,7 +525,6 @@ const s = StyleSheet.create({
     tabText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
     tabTextActive: { color: COLORS.primary, fontWeight: '700' },
 
-    // Content
     summaryBody: { padding: 16 },
 
     readTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },

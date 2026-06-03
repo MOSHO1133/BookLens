@@ -1,517 +1,642 @@
+import { GROK_KEY } from '../constants/config';
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity,
-    StyleSheet, ActivityIndicator, FlatList, StatusBar,
+    StyleSheet, ActivityIndicator, Animated,
+    Dimensions, StatusBar
 } from 'react-native';
-import { ANTHROPIC_KEY } from '../constants/config';
+import { Ionicons } from '@expo/vector-icons';
 
-// ──────────────────────────────────────────────
-// Gutenberg text fetcher + chapter parser
-// ──────────────────────────────────────────────
+const { width } = Dimensions.get('window');
+const FONT_SIZES = [13, 15, 17, 19, 21];
+const THEMES = [
+    { bg: '#fafafa', text: '#2d2d2d', label: 'Light', muted: '#6b7280' },
+    { bg: '#f5f0e8', text: '#2d2418', label: 'Sepia', muted: '#7a6a50' },
+    { bg: '#0f0f1a', text: '#d4d4d4', label: 'Dark', muted: '#6b7280' },
+    { bg: '#0a1628', text: '#c8d8f0', label: 'Night', muted: '#6b8ab0' },
+];
+const BOOK_COLORS = [
+    '#2d1b69', '#0c2340', '#0d2e1a', '#2d1515',
+    '#1e1a0c', '#0e1f2d', '#1a0533', '#2a1a00',
+];
+const getColor = (title) => BOOK_COLORS[(title?.length || 0) % BOOK_COLORS.length];
 
-const stripGutenbergBoilerplate = (rawText) => {
-    // Remove header (everything up to and including the START marker)
-    const startRx = /\*{3}\s*START OF (THE|THIS) PROJECT GUTENBERG[^\n]*\n/i;
-    const endRx = /\*{3}\s*END OF (THE|THIS) PROJECT GUTENBERG/i;
+// ─────────────────────────────────────────────────────────────────────────────
+// Gutenberg: fetch full text and split into chapters
+// ─────────────────────────────────────────────────────────────────────────────
 
-    let text = rawText;
-    const startMatch = startRx.exec(text);
-    if (startMatch) text = text.slice(startMatch.index + startMatch[0].length);
-
-    const endMatch = endRx.exec(text);
-    if (endMatch) text = text.slice(0, endMatch.index);
-
+const stripGutenbergWrapper = (text) => {
+    const startRe = /\*\*\*\s*START OF (THE|THIS) PROJECT GUTENBERG[^\n]*/i;
+    const startMatch = text.match(startRe);
+    if (startMatch) {
+        text = text.slice(startMatch.index + startMatch[0].length);
+        text = text.slice(text.indexOf('\n') + 1);
+    }
+    const endRe = /\*\*\*\s*END OF (THE|THIS) PROJECT GUTENBERG/i;
+    const endMatch = text.match(endRe);
+    if (endMatch) {
+        text = text.slice(0, text.search(endRe));
+    }
     return text.trim();
 };
 
-const parseGutenbergChapters = (text) => {
-    // Patterns: CHAPTER I, CHAPTER 1, Chapter One, PART I, etc.
-    const headingRx = /\n{2,}((?:CHAPTER|PART)\s+(?:[IVXLCDM]+|\d+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY)[^\n]*)\n/gi;
+const splitIntoChapters = (text) => {
+    const t = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-    const matches = [];
-    let m;
-    while ((m = headingRx.exec(text)) !== null) {
-        matches.push({ index: m.index, heading: m[1].trim() });
+    const patterns = [
+        /\n{2,}(CHAPTER\s+(?:[IVXLCDM]+|\d+)\.?(?:[ \t]+[^\n]+)?)\n/g,
+        /\n{2,}(Chapter\s+(?:\d+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten|Eleven|Twelve|[IVXLCDM]+)\.?(?:[ \t]+[^\n]+)?)\n/g,
+        /\n{2,}(PART\s+(?:[IVXLCDM]+|\d+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN)\.?(?:[ \t]+[^\n]+)?)\n/g,
+        /\n{2,}((?:I{1,3}|IV|VI{0,3}|IX|X{1,3}|XI{0,3}|XIV|XV|XVI{0,3}|XIX|XX{0,2})\.)[ \t]*\n/g,
+    ];
+
+    for (const pattern of patterns) {
+        const matches = [];
+        let m;
+        const re = new RegExp(pattern.source, 'gm');
+        while ((m = re.exec(t)) !== null) {
+            matches.push({ index: m.index, heading: m[1].replace(/\n/g, ' ').trim() });
+        }
+        if (matches.length >= 3) {
+            return matches.map((match, i) => {
+                const start = match.index;
+                const end = i + 1 < matches.length ? matches[i + 1].index : t.length;
+                let content = t.slice(start, end).trim();
+                const firstNewline = content.indexOf('\n');
+                if (firstNewline > -1) content = content.slice(firstNewline + 1).trim();
+                return {
+                    num: i + 1,
+                    title: match.heading,
+                    subtitle: '',
+                    content,
+                    isRealText: true,
+                };
+            });
+        }
     }
 
-    if (matches.length < 2) {
-        // Fallback: just split into chunks of ~3000 chars
-        const chunks = [];
-        const chunkSize = 3000;
-        const words = text.split(' ');
-        let current = '';
-        let chunkNum = 1;
-        for (const word of words) {
-            current += word + ' ';
-            if (current.length >= chunkSize) {
-                chunks.push({ num: chunkNum, title: `Part ${chunkNum}`, content: current.trim(), read: false });
-                chunkNum++;
-                current = '';
-            }
+    const paragraphs = t.split(/\n{3,}/).filter(p => p.trim().length > 80);
+    const pages = [];
+    let cur = '';
+    let pageNum = 0;
+
+    for (const para of paragraphs) {
+        cur = cur ? cur + '\n\n' + para : para;
+        if (cur.length >= 2500) {
+            pageNum++;
+            pages.push({ num: pageNum, title: `Part ${pageNum}`, subtitle: '', content: cur.trim(), isRealText: true });
+            cur = '';
         }
-        if (current.trim()) {
-            chunks.push({ num: chunkNum, title: `Part ${chunkNum}`, content: current.trim(), read: false });
-        }
-        return chunks;
+    }
+    if (cur.trim()) {
+        pageNum++;
+        pages.push({ num: pageNum, title: `Part ${pageNum}`, subtitle: '', content: cur.trim(), isRealText: true });
     }
 
-    return matches.map((match, i) => {
-        const start = match.index;
-        const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
-        const content = text.slice(start, end).trim();
-        // Clean heading line from content body
-        const firstNewline = content.indexOf('\n');
-        const body = firstNewline > -1 ? content.slice(firstNewline + 1).trim() : content;
-
-        return {
-            num: i + 1,
-            title: match.heading.replace(/\n/g, ' '),
-            content: body,
-            read: false,
-        };
-    });
+    return pages.length > 0
+        ? pages
+        : [{ num: 1, title: 'Full Text', subtitle: '', content: t.trim(), isRealText: true }];
 };
 
 const fetchGutenbergChapters = async (textUrl) => {
-    const res = await fetch(textUrl);
-    if (!res.ok) throw new Error(`Gutenberg fetch failed: ${res.status}`);
-    const rawText = await res.text();
-    const clean = stripGutenbergBoilerplate(rawText);
-    return parseGutenbergChapters(clean);
+    try {
+        const res = await fetch(textUrl);
+        if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+        const raw = await res.text();
+        const cleaned = stripGutenbergWrapper(raw);
+        const chapters = splitIntoChapters(cleaned);
+        return chapters;
+    } catch (e) {
+        console.log('Gutenberg fetch error:', e.message);
+        return null;
+    }
 };
 
-// ──────────────────────────────────────────────
-// AI chapter list generator
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// AI chapter list (Grok)
+// ─────────────────────────────────────────────────────────────────────────────
 
-const generateAIChapters = async (book) => {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1024,
-            messages: [{
-                role: 'user',
-                content: `List the chapters of "${book.title}" by ${book.author}. 
-Return ONLY a JSON array: [{"num":1,"title":"Chapter Name","subtitle":"Optional subtitle"}]
-No markdown, no preamble.`,
-            }],
-        }),
-    });
-    if (!res.ok) throw new Error(`API ${res.status}`);
-    const data = await res.json();
-    const text = data.content?.[0]?.text || '[]';
-    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return JSON.parse(clean);
+const generateChapters = async (book) => {
+    if (book.gutenbergTextUrl) {
+        const chapters = await fetchGutenbergChapters(book.gutenbergTextUrl);
+        if (chapters && chapters.length > 0) return chapters;
+    }
+
+    try {
+        const res = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GROK_KEY}`,
+            },
+            body: JSON.stringify({
+                model: 'grok-3',
+                max_tokens: 1000,
+                messages: [{
+                    role: 'user',
+                    content: `Generate a realistic chapter list for "${book.title}" by ${book.author}.
+Return ONLY a JSON array. Each item: {"num":1,"title":"Chapter Title","subtitle":"One sentence describing this chapter"}.
+Generate 8-12 chapters that reflect the real book. Return only the JSON array.`
+                }]
+            }),
+        });
+        if (!res.ok) throw new Error(`API error ${res.status}`);
+        const data = await res.json();
+        const text = data.choices[0].message.content || '[]';
+        const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        return JSON.parse(clean);
+    } catch {
+        return [
+            { num: 1, title: 'Introduction', subtitle: 'Setting the foundation for everything ahead' },
+            { num: 2, title: 'The Core Idea', subtitle: 'The fundamental concept at the heart of this book' },
+            { num: 3, title: 'Why It Matters', subtitle: 'Real-world impact and significance' },
+            { num: 4, title: 'How It Works', subtitle: 'A deeper look at the mechanics' },
+            { num: 5, title: 'Key Principles', subtitle: 'The rules that guide everything else' },
+            { num: 6, title: 'Common Pitfalls', subtitle: 'Mistakes to avoid on your journey' },
+            { num: 7, title: 'Putting It Into Practice', subtitle: 'Actionable steps you can take today' },
+            { num: 8, title: 'The Bigger Picture', subtitle: 'How everything connects together' },
+        ];
+    }
 };
 
-// ──────────────────────────────────────────────
-// AI chapter content generator
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// AI chapter content (Grok)
+// ─────────────────────────────────────────────────────────────────────────────
 
-const generateAIChapterContent = async (book, chapter) => {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 2000,
-            messages: [{
-                role: 'user',
-                content: `Write a detailed, engaging summary of ${chapter.title} from "${book.title}" by ${book.author}. 
-Cover all key ideas, events, and insights from this chapter. Write in a clear, readable style.`,
-            }],
-        }),
-    });
-    if (!res.ok) throw new Error(`API ${res.status}`);
-    const data = await res.json();
-    return data.content?.[0]?.text || 'Content unavailable.';
+const generateChapterContent = async (book, chapterNum, chapterTitle) => {
+    try {
+        const res = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${GROK_KEY}`,
+            },
+            body: JSON.stringify({
+                model: 'grok-3',
+                max_tokens: 1000,
+                messages: [{
+                    role: 'user',
+                    content: `Write the content for Chapter ${chapterNum}: "${chapterTitle}" from the book "${book.title}" by ${book.author}.
+Write 4-5 paragraphs of engaging, informative content that reflects what this chapter would actually cover.
+Write in a style that matches the book's genre and tone. Do not include the chapter title or number in your response.`
+                }]
+            }),
+        });
+        if (!res.ok) throw new Error(`API error ${res.status}`);
+        const data = await res.json();
+        return data.choices[0].message.content || '';
+    } catch {
+        return `This chapter explores the key ideas of "${chapterTitle}" as presented in ${book.title}. The author takes us through a series of compelling insights and real-world examples that illuminate the central theme.\n\nThrough careful observation and research, we discover that the principles outlined here apply broadly to everyday situations. The author illustrates this through stories that feel both familiar and revealing.\n\nThe deeper we explore these ideas, the more we realize their transformative potential. What begins as a simple concept gradually unfolds into something profound — a new way of seeing the world around us.\n\nBy the end of this chapter, you'll find yourself equipped with a clearer framework for applying these lessons to your own life and work.`;
+    }
 };
 
-// ──────────────────────────────────────────────
-// Fallback chapters
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
 
-const FALLBACK_CHAPTERS = (book) => [
-    { num: 1, title: 'Chapter 1 – Introduction', content: null, read: false },
-    { num: 2, title: 'Chapter 2 – Core Concepts', content: null, read: false },
-    { num: 3, title: 'Chapter 3 – Key Principles', content: null, read: false },
-    { num: 4, title: 'Chapter 4 – Application', content: null, read: false },
-    { num: 5, title: 'Chapter 5 – Deep Dive', content: null, read: false },
-    { num: 6, title: 'Chapter 6 – Case Studies', content: null, read: false },
-    { num: 7, title: 'Chapter 7 – Advanced Topics', content: null, read: false },
-    { num: 8, title: 'Chapter 8 – Conclusion', content: null, read: false },
-];
-
-// ──────────────────────────────────────────────
-// Main component
-// ──────────────────────────────────────────────
-
-export default function ReaderScreen({ route, navigation }) {
-    const { book, mode, chapter: initialChapter } = route.params;
+export default function ReaderScreen({ navigation, route }) {
+    const { book } = route.params;
     const isGutenberg = !!book.gutenbergTextUrl;
 
-    // ── State ──
+    const [stage, setStage] = useState('chapters');
     const [chapters, setChapters] = useState([]);
-    const [loadingChapters, setLoadingChapters] = useState(true);
-    const [activeChapter, setActiveChapter] = useState(null);
+    const [currentChapter, setCurrentChapter] = useState(null);
     const [chapterContent, setChapterContent] = useState('');
+    const [loadingChapters, setLoadingChapters] = useState(true);
     const [loadingContent, setLoadingContent] = useState(false);
-    const [view, setView] = useState('toc'); // 'toc' | 'reader'
-    const [fontSize, setFontSize] = useState(16);
-    const scrollRef = useRef(null);
+    const [fetchingBook, setFetchingBook] = useState(false);
+    const [fontIndex, setFontIndex] = useState(1);
+    const [themeIndex, setThemeIndex] = useState(0);
+    const [showSettings, setShowSettings] = useState(false);
+    const [readChapters, setReadChapters] = useState([]);
 
-    // ── Load chapters ──
-    useEffect(() => {
-        (async () => {
-            setLoadingChapters(true);
-            try {
-                let loadedChapters;
-                if (isGutenberg) {
-                    loadedChapters = await fetchGutenbergChapters(book.gutenbergTextUrl);
-                } else {
-                    const ai = await generateAIChapters(book).catch(() => null);
-                    loadedChapters = ai
-                        ? ai.map(c => ({ ...c, content: null, read: false }))
-                        : FALLBACK_CHAPTERS(book);
-                }
-                setChapters(loadedChapters);
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const fontSize = FONT_SIZES[fontIndex];
+    const T = THEMES[themeIndex];
 
-                // If launched in chapter mode, open that chapter
-                if (mode === 'chapter' && initialChapter) {
-                    const match = loadedChapters.find(c => c.num === initialChapter.num)
-                        || loadedChapters[0];
-                    if (match) openChapter(match, loadedChapters);
-                } else if (mode === 'full') {
-                    // Open first chapter
-                    openChapter(loadedChapters[0], loadedChapters);
-                }
-            } catch (err) {
-                setChapters(FALLBACK_CHAPTERS(book));
-            } finally {
-                setLoadingChapters(false);
-            }
-        })();
-    }, []);
+    useEffect(() => { loadChapters(); }, []);
 
-    // ── Open a chapter ──
-    const openChapter = async (chapter, chapterList) => {
-        setActiveChapter(chapter);
-        setView('reader');
-        scrollRef.current?.scrollTo({ y: 0, animated: false });
+    const loadChapters = async () => {
+        setLoadingChapters(true);
+        if (isGutenberg) setFetchingBook(true);
+        const chs = await generateChapters(book);
+        setChapters(chs);
+        setLoadingChapters(false);
+        setFetchingBook(false);
+    };
 
-        // Gutenberg: content already in chapter object
-        if (isGutenberg || chapter.content) {
-            setChapterContent(chapter.content || '');
-            return;
-        }
-
-        // AI mode: generate content
+    const openChapter = async (ch) => {
+        setCurrentChapter(ch);
+        setStage('reading');
         setLoadingContent(true);
         setChapterContent('');
-        try {
-            const content = await generateAIChapterContent(book, chapter);
+        setShowSettings(false);
+        fadeAnim.setValue(0);
+
+        if (ch.isRealText) {
+            setChapterContent(ch.content);
+            setLoadingContent(false);
+        } else {
+            const content = await generateChapterContent(book, ch.num, ch.title);
             setChapterContent(content);
-            // Cache it
-            setChapters(prev =>
-                prev.map(c => c.num === chapter.num ? { ...c, content, read: true } : c)
-            );
-        } catch {
-            setChapterContent(
-                `Unable to load content for "${chapter.title}" right now. Please check your connection and try again.`
-            );
-        } finally {
             setLoadingContent(false);
         }
+
+        if (!readChapters.includes(ch.num)) {
+            setReadChapters(p => [...p, ch.num]);
+        }
+        Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
     };
 
-    const goToNextChapter = () => {
-        if (!activeChapter) return;
-        const idx = chapters.findIndex(c => c.num === activeChapter.num);
-        if (idx < chapters.length - 1) openChapter(chapters[idx + 1], chapters);
-    };
+    const chIdx = chapters.findIndex(c => c.num === currentChapter?.num);
+    const hasPrev = chIdx > 0;
+    const hasNext = chIdx < chapters.length - 1;
 
-    const goToPrevChapter = () => {
-        if (!activeChapter) return;
-        const idx = chapters.findIndex(c => c.num === activeChapter.num);
-        if (idx > 0) openChapter(chapters[idx - 1], chapters);
-    };
+    // ── CHAPTER LIST ─────────────────────────────────────────────────────────
+    if (stage === 'chapters') {
+        const progress = chapters.length > 0
+            ? (readChapters.length / chapters.length) * 100 : 0;
 
-    const activeIndex = chapters.findIndex(c => c.num === activeChapter?.num);
-
-    // ── Header ──
-    const renderHeader = () => (
-        <View style={styles.header}>
-            <TouchableOpacity
-                style={styles.headerBtn}
-                onPress={() => {
-                    if (view === 'reader') { setView('toc'); return; }
-                    navigation.goBack();
-                }}
-            >
-                <Text style={styles.headerBtnText}>‹ Back</Text>
-            </TouchableOpacity>
-            <Text style={styles.headerTitle} numberOfLines={1}>{book.title}</Text>
-            {view === 'reader' && (
-                <View style={styles.fontControls}>
-                    <TouchableOpacity onPress={() => setFontSize(s => Math.max(12, s - 2))}>
-                        <Text style={styles.fontBtn}>A-</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => setFontSize(s => Math.min(24, s + 2))}>
-                        <Text style={styles.fontBtn}>A+</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-        </View>
-    );
-
-    // ── Table of Contents ──
-    if (view === 'toc') {
         return (
             <View style={styles.container}>
-                <StatusBar barStyle="dark-content" />
-                {renderHeader()}
+                <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
 
-                {/* Source badge */}
-                <View style={[styles.sourceBadge, isGutenberg ? styles.sourceBadgeGreen : styles.sourceBadgePurple]}>
-                    <Text style={styles.sourceBadgeText}>
-                        {isGutenberg
-                            ? '📚 Project Gutenberg — Original Text'
-                            : '🤖 AI-Generated Chapter Summaries'}
-                    </Text>
+                <View style={styles.header}>
+                    <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+                        <Ionicons name="chevron-back" size={22} color="#fff" />
+                    </TouchableOpacity>
+                    <View style={styles.headerInfo}>
+                        <Text style={styles.headerTitle} numberOfLines={1}>{book.title}</Text>
+                        <Text style={styles.headerAuthor}>{book.author}</Text>
+                    </View>
+                    <TouchableOpacity
+                        style={styles.summaryChip}
+                        onPress={() => navigation.navigate('Summary', { book, mode: 'full' })}
+                    >
+                        <Ionicons name="document-text-outline" size={13} color="#fff" />
+                        <Text style={styles.summaryChipText}>Summary</Text>
+                    </TouchableOpacity>
                 </View>
 
-                {loadingChapters ? (
-                    <View style={styles.centered}>
-                        <ActivityIndicator size="large" color="#6200EE" />
-                        <Text style={styles.loadingLabel}>
-                            {isGutenberg ? 'Fetching full text…' : 'Building table of contents…'}
+                {/* Book card */}
+                <View style={styles.bookCard}>
+                    <View style={[styles.bookCover, { backgroundColor: getColor(book.title) }]}>
+                        <Text style={styles.bookCoverText}>{book.title[0]}</Text>
+                    </View>
+                    <View style={styles.bookMeta}>
+                        <Text style={styles.bookMetaTitle} numberOfLines={2}>{book.title}</Text>
+                        <Text style={styles.bookMetaAuthor}>{book.author}</Text>
+                        <View style={styles.bookMetaBadges}>
+                            {book.rating && book.rating !== '—' && (
+                                <View style={styles.badge}>
+                                    <Ionicons name="star" size={10} color="#f59e0b" />
+                                    <Text style={styles.badgeText}>{book.rating}</Text>
+                                </View>
+                            )}
+                            {isGutenberg && (
+                                <View style={styles.badgeBlue}>
+                                    <Text style={styles.badgeBlueText}>📖 Real text</Text>
+                                </View>
+                            )}
+                            <View style={styles.badge}>
+                                <Ionicons name="book-outline" size={10} color="#6b7280" />
+                                <Text style={styles.badgeText}>{readChapters.length}/{chapters.length} read</Text>
+                            </View>
+                        </View>
+                        {progress > 0 && (
+                            <View style={styles.progressTrack}>
+                                <View style={[styles.progressFill, { width: `${progress}%` }]} />
+                            </View>
+                        )}
+                    </View>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                    <View style={[styles.aiNotice, isGutenberg && styles.gutenbergNotice]}>
+                        <Ionicons
+                            name={isGutenberg ? 'library-outline' : 'sparkles'}
+                            size={13}
+                            color={isGutenberg ? '#2563eb' : '#7c3aed'}
+                        />
+                        <Text style={[styles.aiNoticeText, isGutenberg && styles.gutenbergNoticeText]}>
+                            {isGutenberg
+                                ? 'Reading original text from Project Gutenberg — 100% free & legal public domain'
+                                : 'Chapters are intelligently generated to match the book\'s real content and structure'
+                            }
                         </Text>
                     </View>
-                ) : (
-                    <>
-                        <Text style={styles.tocMeta}>
-                            {chapters.length} chapter{chapters.length !== 1 ? 's' : ''}
-                            {!isGutenberg && ` · ${chapters.filter(c => c.read).length} read`}
-                        </Text>
-                        <FlatList
-                            data={chapters}
-                            keyExtractor={c => String(c.num)}
-                            contentContainerStyle={{ paddingBottom: 40 }}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={styles.tocRow}
-                                    onPress={() => openChapter(item, chapters)}
-                                >
-                                    <View style={styles.tocNumBadge}>
-                                        <Text style={styles.tocNumText}>{item.num}</Text>
-                                    </View>
-                                    <View style={styles.tocInfo}>
-                                        <Text style={styles.tocTitle}>{item.title}</Text>
-                                        {item.subtitle ? (
-                                            <Text style={styles.tocSubtitle}>{item.subtitle}</Text>
-                                        ) : null}
-                                    </View>
-                                    {item.read && !isGutenberg && (
-                                        <Text style={styles.readDot}>✓</Text>
-                                    )}
-                                    <Text style={styles.tocChevron}>›</Text>
-                                </TouchableOpacity>
-                            )}
-                        />
-                    </>
-                )}
+
+                    <Text style={styles.tocTitle}>Table of Contents</Text>
+
+                    {loadingChapters ? (
+                        <View style={styles.loadingBox}>
+                            <ActivityIndicator color="#1a1a2e" />
+                            <Text style={styles.loadingText}>
+                                {fetchingBook ? 'Downloading book text...' : 'Preparing chapters...'}
+                            </Text>
+                        </View>
+                    ) : (
+                        chapters.map((ch) => (
+                            <TouchableOpacity
+                                key={ch.num}
+                                style={styles.chRow}
+                                onPress={() => openChapter(ch)}
+                                activeOpacity={0.7}
+                            >
+                                <View style={[
+                                    styles.chNumBubble,
+                                    readChapters.includes(ch.num) && styles.chNumBubbleDone,
+                                ]}>
+                                    {readChapters.includes(ch.num)
+                                        ? <Ionicons name="checkmark" size={12} color="#fff" />
+                                        : <Text style={styles.chNumText}>{ch.num}</Text>
+                                    }
+                                </View>
+                                <View style={styles.chTexts}>
+                                    <Text style={styles.chName}>
+                                        {ch.isRealText ? ch.title : `Chapter ${ch.num}: ${ch.title}`}
+                                    </Text>
+                                    {ch.subtitle ? (
+                                        <Text style={styles.chSub} numberOfLines={1}>{ch.subtitle}</Text>
+                                    ) : null}
+                                </View>
+                                {ch.isRealText && (
+                                    <View style={styles.realTextDot} />
+                                )}
+                                <Ionicons name="chevron-forward" size={15} color="#9ca3af" />
+                            </TouchableOpacity>
+                        ))
+                    )}
+                    <View style={{ height: 40 }} />
+                </ScrollView>
             </View>
         );
     }
 
-    // ── Reader view ──
+    // ── READING VIEW ──────────────────────────────────────────────────────────
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="dark-content" />
-            {renderHeader()}
+        <View style={[styles.reader, { backgroundColor: T.bg }]}>
+            <StatusBar
+                barStyle={themeIndex >= 2 ? 'light-content' : 'dark-content'}
+                backgroundColor={T.bg}
+            />
 
-            {/* Chapter nav bar */}
-            <View style={styles.chapterNav}>
-                <TouchableOpacity
-                    style={[styles.navBtn, activeIndex === 0 && styles.navBtnDisabled]}
-                    onPress={goToPrevChapter}
-                    disabled={activeIndex === 0}
-                >
-                    <Text style={styles.navBtnText}>‹ Prev</Text>
+            <View style={[styles.readerBar, {
+                backgroundColor: T.bg,
+                borderBottomColor: themeIndex >= 2 ? 'rgba(255,255,255,0.07)' : '#e5e7eb',
+            }]}>
+                <TouchableOpacity onPress={() => setStage('chapters')} style={styles.readerBarBtn}>
+                    <Ionicons name="list" size={21} color={T.text} />
                 </TouchableOpacity>
-
-                <TouchableOpacity style={styles.navChapterLabel} onPress={() => setView('toc')}>
-                    <Text style={styles.navChapterText} numberOfLines={1}>
-                        {activeChapter?.title}
-                    </Text>
-                    <Text style={styles.navChapterMeta}>
-                        {activeIndex + 1} / {chapters.length}
-                    </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.navBtn, activeIndex === chapters.length - 1 && styles.navBtnDisabled]}
-                    onPress={goToNextChapter}
-                    disabled={activeIndex === chapters.length - 1}
-                >
-                    <Text style={styles.navBtnText}>Next ›</Text>
+                <Text style={[styles.readerChTitle, { color: T.text }]} numberOfLines={1}>
+                    {currentChapter?.isRealText
+                        ? currentChapter?.title
+                        : `Ch.${currentChapter?.num} · ${currentChapter?.title}`
+                    }
+                </Text>
+                <TouchableOpacity onPress={() => setShowSettings(!showSettings)} style={styles.readerBarBtn}>
+                    <Ionicons name={showSettings ? 'close' : 'settings-outline'} size={20} color={T.text} />
                 </TouchableOpacity>
             </View>
 
-            {/* Content */}
-            {loadingContent ? (
-                <View style={styles.centered}>
-                    <ActivityIndicator size="large" color="#6200EE" />
-                    <Text style={styles.loadingLabel}>Generating chapter…</Text>
-                </View>
-            ) : (
-                <ScrollView
-                    ref={scrollRef}
-                    style={styles.readerScroll}
-                    contentContainerStyle={styles.readerContent}
-                >
-                    <Text style={[styles.readerText, { fontSize }]}>
-                        {chapterContent}
-                    </Text>
-
-                    {/* Bottom nav */}
-                    <View style={styles.bottomNav}>
-                        {activeIndex > 0 && (
+            {showSettings && (
+                <View style={[styles.settingsDrawer, {
+                    backgroundColor: themeIndex >= 2 ? '#1a1a2e' : '#fff',
+                    borderBottomColor: themeIndex >= 2 ? 'rgba(255,255,255,0.08)' : '#e5e7eb',
+                }]}>
+                    <View style={styles.settingsRow}>
+                        <Text style={[styles.settingsLabel, { color: T.text }]}>Text size</Text>
+                        <View style={styles.settingsBtns}>
                             <TouchableOpacity
-                                style={styles.bottomNavBtn}
-                                onPress={goToPrevChapter}
+                                style={[styles.sBtn, { borderColor: themeIndex >= 2 ? 'rgba(255,255,255,0.15)' : '#e5e7eb' }]}
+                                onPress={() => setFontIndex(Math.max(0, fontIndex - 1))}
                             >
-                                <Text style={styles.bottomNavText}>← Previous Chapter</Text>
+                                <Text style={[styles.sBtnText, { color: T.text }]}>A−</Text>
                             </TouchableOpacity>
-                        )}
-                        {activeIndex < chapters.length - 1 && (
+                            <Text style={[styles.sBtnText, { color: T.muted, minWidth: 24, textAlign: 'center' }]}>{fontSize}</Text>
                             <TouchableOpacity
-                                style={[styles.bottomNavBtn, styles.bottomNavBtnPrimary]}
-                                onPress={goToNextChapter}
+                                style={[styles.sBtn, { borderColor: themeIndex >= 2 ? 'rgba(255,255,255,0.15)' : '#e5e7eb' }]}
+                                onPress={() => setFontIndex(Math.min(FONT_SIZES.length - 1, fontIndex + 1))}
                             >
-                                <Text style={[styles.bottomNavText, styles.bottomNavTextPrimary]}>
-                                    Next Chapter →
-                                </Text>
+                                <Text style={[styles.sBtnText, { color: T.text }]}>A+</Text>
                             </TouchableOpacity>
-                        )}
-                        {activeIndex === chapters.length - 1 && (
-                            <TouchableOpacity
-                                style={[styles.bottomNavBtn, styles.bottomNavBtnPrimary]}
-                                onPress={() => navigation.goBack()}
-                            >
-                                <Text style={[styles.bottomNavText, styles.bottomNavTextPrimary]}>
-                                    ✓ Finished
-                                </Text>
-                            </TouchableOpacity>
-                        )}
+                        </View>
                     </View>
-                </ScrollView>
+                    <View style={styles.settingsRow}>
+                        <Text style={[styles.settingsLabel, { color: T.text }]}>Background</Text>
+                        <View style={styles.swatches}>
+                            {THEMES.map((t, i) => (
+                                <TouchableOpacity
+                                    key={i}
+                                    style={[styles.swatch, {
+                                        backgroundColor: t.bg,
+                                        borderColor: themeIndex === i ? '#7c3aed' : (themeIndex >= 2 ? 'rgba(255,255,255,0.15)' : '#d1d5db'),
+                                        borderWidth: themeIndex === i ? 2.5 : 1,
+                                    }]}
+                                    onPress={() => setThemeIndex(i)}
+                                >
+                                    <Text style={{ fontSize: 9, color: t.text, fontWeight: '600' }}>{t.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                </View>
             )}
+
+            <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.readerContent}
+                showsVerticalScrollIndicator={false}
+            >
+                {currentChapter?.isRealText && (
+                    <View style={styles.realTextBadge}>
+                        <Ionicons name="library-outline" size={11} color="#2563eb" />
+                        <Text style={styles.realTextBadgeText}>Original text · Project Gutenberg</Text>
+                    </View>
+                )}
+
+                <Text style={[styles.chapterLabel, { color: T.muted }]}>
+                    {currentChapter?.isRealText ? '' : `CHAPTER ${currentChapter?.num}`}
+                </Text>
+                <Text style={[styles.chapterTitle, { color: T.text }]}>
+                    {currentChapter?.title}
+                </Text>
+                <View style={styles.titleUnderline} />
+
+                {loadingContent ? (
+                    <View style={styles.contentLoading}>
+                        <ActivityIndicator color="#7c3aed" size="large" />
+                        <Text style={[styles.contentLoadingText, { color: T.muted }]}>
+                            Loading chapter...
+                        </Text>
+                    </View>
+                ) : (
+                    <Animated.Text style={[
+                        styles.bodyText,
+                        { color: T.text, fontSize, lineHeight: fontSize * 1.9, opacity: fadeAnim }
+                    ]}>
+                        {chapterContent}
+                    </Animated.Text>
+                )}
+
+                {!loadingContent && chapterContent ? (
+                    <View style={styles.chNav}>
+                        <TouchableOpacity
+                            style={[styles.chNavBtn, !hasPrev && styles.chNavBtnDisabled, {
+                                borderColor: themeIndex >= 2 ? 'rgba(255,255,255,0.15)' : '#e5e7eb',
+                            }]}
+                            onPress={() => hasPrev && openChapter(chapters[chIdx - 1])}
+                            disabled={!hasPrev}
+                        >
+                            <Ionicons name="chevron-back" size={16} color={hasPrev ? T.text : T.muted} />
+                            <Text style={[styles.chNavText, { color: hasPrev ? T.text : T.muted }]}>Previous</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.chNavCenter}
+                            onPress={() => setStage('chapters')}
+                        >
+                            <Text style={[styles.chNavCenterText, { color: T.muted }]}>
+                                {chIdx + 1} / {chapters.length}
+                            </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.chNavBtn, styles.chNavBtnRight, !hasNext && styles.chNavBtnDisabled, {
+                                borderColor: themeIndex >= 2 ? 'rgba(255,255,255,0.15)' : '#e5e7eb',
+                                backgroundColor: hasNext ? '#7c3aed' : 'transparent',
+                            }]}
+                            onPress={() => hasNext && openChapter(chapters[chIdx + 1])}
+                            disabled={!hasNext}
+                        >
+                            <Text style={[styles.chNavText, { color: hasNext ? '#fff' : T.muted }]}>Next</Text>
+                            <Ionicons name="chevron-forward" size={16} color={hasNext ? '#fff' : T.muted} />
+                        </TouchableOpacity>
+                    </View>
+                ) : null}
+
+                <View style={{ height: 40 }} />
+            </ScrollView>
         </View>
     );
 }
 
-// ──────────────────────────────────────────────
-// Styles
-// ──────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#FAF8F4' },
-
-    // Header
+    container: { flex: 1, backgroundColor: '#f8f9fa' },
     header: {
-        flexDirection: 'row', alignItems: 'center',
-        paddingHorizontal: 16, paddingTop: 50, paddingBottom: 12,
-        backgroundColor: '#FFF',
-        borderBottomWidth: 1, borderBottomColor: '#EEE',
+        backgroundColor: '#1a1a2e', paddingTop: 52, paddingBottom: 14,
+        paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 10,
     },
-    headerBtn: { paddingRight: 12 },
-    headerBtnText: { fontSize: 16, color: '#6200EE', fontWeight: '600' },
-    headerTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
-    fontControls: { flexDirection: 'row', gap: 8 },
-    fontBtn: { fontSize: 14, color: '#6200EE', fontWeight: '700', paddingHorizontal: 4 },
+    backBtn: {
+        width: 34, height: 34, borderRadius: 17,
+        backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center',
+    },
+    headerInfo: { flex: 1 },
+    headerTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
+    headerAuthor: { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 1 },
+    summaryChip: {
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 20,
+        paddingHorizontal: 10, paddingVertical: 6,
+    },
+    summaryChipText: { fontSize: 11, color: '#fff', fontWeight: '600' },
 
-    // Source badge
-    sourceBadge: {
-        paddingVertical: 6, paddingHorizontal: 16,
-        alignItems: 'center',
+    bookCard: {
+        flexDirection: 'row', gap: 14, padding: 16,
+        backgroundColor: '#fff', borderBottomWidth: 0.5, borderBottomColor: '#e5e7eb',
     },
-    sourceBadgeGreen: { backgroundColor: '#E8F5E9' },
-    sourceBadgePurple: { backgroundColor: '#EDE7F6' },
-    sourceBadgeText: { fontSize: 12, fontWeight: '600', color: '#444' },
+    bookCover: {
+        width: 64, height: 88, borderRadius: 8,
+        alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    },
+    bookCoverText: { fontSize: 28, fontWeight: '700', color: 'rgba(255,255,255,0.4)' },
+    bookMeta: { flex: 1, justifyContent: 'center' },
+    bookMetaTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', marginBottom: 3 },
+    bookMetaAuthor: { fontSize: 12, color: '#6b7280', marginBottom: 8 },
+    bookMetaBadges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+    badge: {
+        flexDirection: 'row', alignItems: 'center', gap: 3,
+        backgroundColor: '#f3f4f6', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
+    },
+    badgeText: { fontSize: 10, color: '#6b7280', fontWeight: '500' },
+    badgeBlue: { backgroundColor: '#eff6ff', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+    badgeBlueText: { fontSize: 10, color: '#2563eb', fontWeight: '600' },
+    progressTrack: { height: 4, backgroundColor: '#e5e7eb', borderRadius: 2, marginTop: 8, overflow: 'hidden' },
+    progressFill: { height: 4, backgroundColor: '#10b981', borderRadius: 2 },
 
-    // TOC
-    tocMeta: {
-        fontSize: 13, color: '#999', paddingHorizontal: 16,
-        paddingVertical: 8,
+    aiNotice: {
+        flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+        margin: 14, padding: 12,
+        backgroundColor: 'rgba(124,58,237,0.06)', borderRadius: 10,
+        borderWidth: 0.5, borderColor: 'rgba(124,58,237,0.18)',
     },
-    tocRow: {
-        flexDirection: 'row', alignItems: 'center',
-        backgroundColor: '#FFF', marginHorizontal: 16,
-        marginBottom: 8, borderRadius: 12, padding: 14,
-        shadowColor: '#000', shadowOpacity: 0.03,
-        shadowOffset: { width: 0, height: 2 }, shadowRadius: 4,
-        elevation: 1,
-    },
-    tocNumBadge: {
-        width: 36, height: 36, borderRadius: 18,
-        backgroundColor: '#EDE7F6', alignItems: 'center',
-        justifyContent: 'center', marginRight: 12,
-    },
-    tocNumText: { fontSize: 13, fontWeight: '700', color: '#6200EE' },
-    tocInfo: { flex: 1 },
-    tocTitle: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
-    tocSubtitle: { fontSize: 12, color: '#888', marginTop: 2 },
-    readDot: { color: '#4CAF50', fontSize: 14, marginRight: 4 },
-    tocChevron: { fontSize: 20, color: '#CCC' },
+    aiNoticeText: { flex: 1, fontSize: 12, color: '#5b21b6', lineHeight: 17 },
+    gutenbergNotice: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
+    gutenbergNoticeText: { color: '#1e40af' },
 
-    // Chapter nav bar
-    chapterNav: {
-        flexDirection: 'row', alignItems: 'center',
-        backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#EEE',
-        paddingHorizontal: 12, paddingVertical: 10,
-    },
-    navBtn: { paddingHorizontal: 8, paddingVertical: 4 },
-    navBtnDisabled: { opacity: 0.3 },
-    navBtnText: { fontSize: 14, color: '#6200EE', fontWeight: '600' },
-    navChapterLabel: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
-    navChapterText: { fontSize: 13, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
-    navChapterMeta: { fontSize: 11, color: '#AAA', marginTop: 1 },
-
-    // Reader
-    readerScroll: { flex: 1 },
-    readerContent: { padding: 20, paddingBottom: 60 },
-    readerText: {
-        color: '#2A2A2A', lineHeight: 28,
-        fontFamily: 'Georgia',
+    tocTitle: {
+        fontSize: 13, fontWeight: '700', color: '#6b7280',
+        paddingHorizontal: 16, paddingBottom: 6, letterSpacing: 0.5,
     },
 
-    // Bottom nav
-    bottomNav: {
-        flexDirection: 'row', justifyContent: 'space-between',
-        marginTop: 40, gap: 12,
+    chRow: {
+        flexDirection: 'row', alignItems: 'center', gap: 12,
+        paddingHorizontal: 16, paddingVertical: 13,
+        borderBottomWidth: 0.5, borderBottomColor: '#f3f4f6', backgroundColor: '#fff',
     },
-    bottomNavBtn: {
-        flex: 1, paddingVertical: 14, borderRadius: 12,
-        alignItems: 'center', backgroundColor: '#F0EBF8',
+    chNumBubble: {
+        width: 30, height: 30, borderRadius: 15,
+        backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
     },
-    bottomNavBtnPrimary: { backgroundColor: '#6200EE' },
-    bottomNavText: { fontSize: 14, fontWeight: '600', color: '#6200EE' },
-    bottomNavTextPrimary: { color: '#FFF' },
+    chNumBubbleDone: { backgroundColor: '#10b981' },
+    chNumText: { fontSize: 12, fontWeight: '600', color: '#6b7280' },
+    chTexts: { flex: 1 },
+    chName: { fontSize: 13, fontWeight: '600', color: '#1a1a2e', marginBottom: 2 },
+    chSub: { fontSize: 11, color: '#9ca3af' },
+    realTextDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#2563eb' },
 
-    // Misc
-    centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    loadingLabel: { marginTop: 12, fontSize: 14, color: '#888' },
+    loadingBox: { alignItems: 'center', padding: 40, gap: 10 },
+    loadingText: { fontSize: 13, color: '#6b7280', textAlign: 'center' },
+
+    reader: { flex: 1 },
+    readerBar: {
+        paddingTop: 52, paddingBottom: 12, paddingHorizontal: 16,
+        flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 0.5,
+    },
+    readerBarBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+    readerChTitle: { flex: 1, fontSize: 13, fontWeight: '600', textAlign: 'center' },
+
+    settingsDrawer: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 0.5, gap: 12 },
+    settingsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    settingsLabel: { fontSize: 13, fontWeight: '500' },
+    settingsBtns: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    sBtn: { width: 34, height: 34, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+    sBtnText: { fontSize: 13, fontWeight: '600' },
+    swatches: { flexDirection: 'row', gap: 8 },
+    swatch: { width: 48, height: 28, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+
+    readerContent: { paddingHorizontal: 22, paddingTop: 28, paddingBottom: 20 },
+    realTextBadge: {
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        backgroundColor: '#eff6ff', borderRadius: 20, alignSelf: 'flex-start',
+        paddingHorizontal: 10, paddingVertical: 4, marginBottom: 14,
+    },
+    realTextBadgeText: { fontSize: 11, color: '#2563eb', fontWeight: '600' },
+    chapterLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 2, marginBottom: 8 },
+    chapterTitle: { fontSize: 22, fontWeight: '800', lineHeight: 30, marginBottom: 12 },
+    titleUnderline: { width: 40, height: 3, backgroundColor: '#7c3aed', borderRadius: 2, marginBottom: 24 },
+    bodyText: {},
+    contentLoading: { alignItems: 'center', paddingVertical: 60, gap: 14 },
+    contentLoadingText: { fontSize: 14 },
+
+    chNav: { flexDirection: 'row', alignItems: 'center', marginTop: 36, gap: 10 },
+    chNavBtn: {
+        flex: 1, flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'center', gap: 5, paddingVertical: 12, borderRadius: 10, borderWidth: 1,
+    },
+    chNavBtnRight: {},
+    chNavBtnDisabled: { opacity: 0.35 },
+    chNavText: { fontSize: 13, fontWeight: '600' },
+    chNavCenter: { paddingHorizontal: 12 },
+    chNavCenterText: { fontSize: 12, fontWeight: '500' },
 });

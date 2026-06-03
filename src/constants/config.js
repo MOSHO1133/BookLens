@@ -1,2 +1,2 @@
 import appJson from '../../app.json';
-export const ANTHROPIC_KEY = appJson.expo.extra.anthropicKey;
+export const GROK_KEY = appJson.expo.extra.grokKey;
