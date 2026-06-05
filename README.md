@@ -361,7 +361,7 @@ Open a PR and describe what you changed!
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+APACHE License — see [LICENSE](LICENSE) for details.
 
 ---
 
