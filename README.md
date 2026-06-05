@@ -62,7 +62,7 @@
 
 | Screen 1 | Screen 2 | Screen 3 |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/1.11.jpeg" width="200" /> | <img src="assets/screenshots/1.22.jpeg" width="200" /> | <img src="assets/screenshots/1.1.jpeg" width="200" /> |
+| <img src="assets/screenshots/1.11.jpeg" width="200" /> | <img src="assets/screenshots/1.12.jpeg" width="200" /> | <img src="assets/screenshots/1.1.jpeg" width="200" /> |
 
 | Screen 4 | Screen 5 | Screen 6 |
 |:---:|:---:|:---:|
