@@ -62,15 +62,15 @@
 
 | Screen 1 | Screen 2 | Screen 3 |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/1.1.jpeg" width="200" /> | <img src="assets/screenshots/1.2.jpeg" width="200" /> | <img src="assets/screenshots/1.3.jpeg" width="200" /> |
+| <img src="assets/screenshots/1.11.jpeg" width="200" /> | <img src="assets/screenshots/1.22.jpeg" width="200" /> | <img src="assets/screenshots/1.1.jpeg" width="200" /> |
 
 | Screen 4 | Screen 5 | Screen 6 |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/1.4.jpeg" width="200" /> | <img src="assets/screenshots/1.5.jpeg" width="200" /> | <img src="assets/screenshots/1.6.jpeg" width="200" /> |
+| <img src="assets/screenshots/1.2.jpeg" width="200" /> | <img src="assets/screenshots/1.3.jpeg" width="200" /> | <img src="assets/screenshots/1.4.jpeg" width="200" /> |
 
-| Screen 7 |
-|:---:|
-| <img src="assets/screenshots/1.7.jpeg" width="200" /> |
+| Screen 4 | Screen 5 | Screen 6 |
+|:---:|:---:|:---:|
+| <img src="assets/screenshots/1.5.jpeg" width="200" /> | <img src="assets/screenshots/1.6.jpeg" width="200" /> | <img src="assets/screenshots/1.7.jpeg" width="200" /> |
 
 </div>
 
