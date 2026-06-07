@@ -9,8 +9,8 @@
 [![React Native](https://img.shields.io/badge/React%20Native-0.74-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://reactnative.dev)
 [![Expo](https://img.shields.io/badge/Expo-SDK%2051-000020?style=for-the-badge&logo=expo&logoColor=white)](https://expo.dev)
 [![Claude AI](https://img.shields.io/badge/Claude-Sonnet%204-CC785C?style=for-the-badge&logo=anthropic&logoColor=white)](https://anthropic.com)
-[![Firebase](https://img.shields.io/badge/Firebase-Auth%20%26%20DB-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge)](LICENSE)
+[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com)
 
 <br />
 
@@ -62,15 +62,15 @@
 
 | Screen 1 | Screen 2 | Screen 3 |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/1.1.jpeg" width="200" /> | <img src="assets/screenshots/1.2.jpeg" width="200" /> | <img src="assets/screenshots/1.3.jpeg" width="200" /> |
+| <img src="assets/screenshots/1.11.jpeg" width="200" /> | <img src="assets/screenshots/1.12.jpeg" width="200" /> | <img src="assets/screenshots/1.1.jpeg" width="200" /> |
 
 | Screen 4 | Screen 5 | Screen 6 |
 |:---:|:---:|:---:|
-| <img src="assets/screenshots/1.4.jpeg" width="200" /> | <img src="assets/screenshots/1.5.jpeg" width="200" /> | <img src="assets/screenshots/1.6.jpeg" width="200" /> |
+| <img src="assets/screenshots/1.2.jpeg" width="200" /> | <img src="assets/screenshots/1.3.jpeg" width="200" /> | <img src="assets/screenshots/1.4.jpeg" width="200" /> |
 
-| Screen 7 |
-|:---:|
-| <img src="assets/screenshots/1.7.jpeg" width="200" /> |
+| Screen 4 | Screen 5 | Screen 6 |
+|:---:|:---:|:---:|
+| <img src="assets/screenshots/1.5.jpeg" width="200" /> | <img src="assets/screenshots/1.6.jpeg" width="200" /> | <img src="assets/screenshots/1.7.jpeg" width="200" /> |
 
 </div>
 
@@ -361,7 +361,7 @@ Open a PR and describe what you changed!
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+APACHE License — see [LICENSE](LICENSE) for details.
 
 ---
 
