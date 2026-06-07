@@ -30,8 +30,6 @@
       "expo-web-browser",
       "expo-font"
     ],
-    "extra": {
-      "grokKey": "xai-LEQSA80WkDNy4g6Q2RKKbSC7PE2dF85V6NGFJwtHIWOCeKfuT6Prh12RGCh0pIRDw4dle2udLneMGIaE"
-    }
+    "extra": {}
   }
 }

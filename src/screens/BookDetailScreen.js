@@ -6,6 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SHADOW } from '../constants/theme';
 import { supabase, saveBook } from '../services/supabase';
+import { GROK_KEY } from '../constants/config';
 
 const COVER_COLORS = ['#2d1b69', '#0c2340', '#0d2e1a', '#2d1515', '#1e1a0c', '#0e1f2d'];
 
@@ -15,21 +16,15 @@ const COVER_COLORS = ['#2d1b69', '#0c2340', '#0d2e1a', '#2d1515', '#1e1a0c', '#0
 
 const fetchRealChapters = async (book) => {
     try {
-        // Extract the work ID from the book key (e.g. "/works/OL45804W" → "OL45804W")
         const workId = book.id?.replace('/works/', '').replace('works/', '') || '';
+        if (!workId || !workId.startsWith('OL')) return null;
 
-        if (!workId || !workId.startsWith('OL')) {
-            return null;
-        }
-
-        // Try to get table of contents from Open Library editions
         const edRes = await fetch(
             `https://openlibrary.org/works/${workId}/editions.json?limit=5`
         );
         const edData = await edRes.json();
         const editions = edData.entries || [];
 
-        // Look for an edition that has a table_of_contents
         for (const edition of editions) {
             const toc = edition.table_of_contents;
             if (toc && toc.length > 2) {
@@ -40,9 +35,8 @@ const fetchRealChapters = async (book) => {
                         id: i + 1,
                         num: i + 1,
                         title: item.title.trim(),
-                        confidence: Math.floor(Math.random() * 5) + 93, // 93-97
+                        confidence: Math.floor(Math.random() * 5) + 93,
                     }));
-
                 if (chapters.length >= 3) return chapters;
             }
         }
@@ -52,7 +46,10 @@ const fetchRealChapters = async (book) => {
     }
 };
 
-// Generate AI-inferred chapter list for books without TOC
+// ─────────────────────────────────────────────────────────────────────────────
+// Generate AI-inferred chapter list using Grok
+// ─────────────────────────────────────────────────────────────────────────────
+
 const buildAIChapterPrompt = (book) => `
 You know the book "${book.title}" by ${book.author}. List the actual chapter titles or major sections of this book.
 
@@ -67,16 +64,14 @@ Return the real chapters/sections from "${book.title}". If it has a prologue or 
 
 const fetchAIChapters = async (book) => {
     try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        const res = await fetch('https://api.x.ai/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '',
-                'anthropic-version': '2023-06-01',
-                'anthropic-dangerous-direct-browser-access': 'true',
+                'Authorization': `Bearer ${GROK_KEY}`,
             },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'grok-3',
                 max_tokens: 600,
                 messages: [{ role: 'user', content: buildAIChapterPrompt(book) }],
             }),
@@ -85,7 +80,7 @@ const fetchAIChapters = async (book) => {
         if (!res.ok) throw new Error('API error');
 
         const data = await res.json();
-        const raw = data.content?.[0]?.text || '[]';
+        const raw = data.choices[0].message.content || '[]';
         const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
         const parsed = JSON.parse(clean);
 
@@ -100,7 +95,7 @@ const fetchAIChapters = async (book) => {
     }
 };
 
-// Fallback static chapters (last resort)
+// Fallback static chapters
 const getStaticChapters = (book) => [
     { id: 1, num: 1, title: 'Introduction & Context', confidence: 96 },
     { id: 2, num: 2, title: 'The Central Problem', confidence: 95 },
@@ -127,14 +122,13 @@ export default function BookDetailScreen({ navigation, route }) {
     const [saving, setSaving] = useState(false);
     const [chapters, setChapters] = useState([]);
     const [chaptersLoading, setChaptersLoading] = useState(false);
-    const [chaptersSource, setChaptersSource] = useState(''); // 'library' | 'ai' | 'fallback'
+    const [chaptersSource, setChaptersSource] = useState('');
 
     const coverBg = COVER_COLORS[(book.title?.length || 0) % COVER_COLORS.length];
     const confidence = chapters.length > 0
         ? Math.round(chapters.reduce((s, c) => s + c.confidence, 0) / chapters.length)
         : 95;
 
-    // Load chapters when Chapters tab is first opened
     useEffect(() => {
         if (activeTab === 'chapters' && chapters.length === 0) {
             loadChapters();
@@ -144,7 +138,6 @@ export default function BookDetailScreen({ navigation, route }) {
     const loadChapters = async () => {
         setChaptersLoading(true);
 
-        // 1. Try Open Library
         const libChapters = await fetchRealChapters(book);
         if (libChapters) {
             setChapters(libChapters);
@@ -153,7 +146,6 @@ export default function BookDetailScreen({ navigation, route }) {
             return;
         }
 
-        // 2. Try AI-generated chapters
         const aiChapters = await fetchAIChapters(book);
         if (aiChapters && aiChapters.length >= 3) {
             setChapters(aiChapters);
@@ -162,7 +154,6 @@ export default function BookDetailScreen({ navigation, route }) {
             return;
         }
 
-        // 3. Static fallback
         setChapters(getStaticChapters(book));
         setChaptersSource('fallback');
         setChaptersLoading(false);
@@ -221,7 +212,6 @@ export default function BookDetailScreen({ navigation, route }) {
                     <Text style={styles.title}>{book.title || 'Unknown Title'}</Text>
                     <Text style={styles.author}>{book.author || 'Unknown Author'}</Text>
 
-                    {/* Pills */}
                     <View style={styles.pills}>
                         {book.year && (
                             <View style={styles.pill}>
@@ -246,7 +236,6 @@ export default function BookDetailScreen({ navigation, route }) {
                         )}
                     </View>
 
-                    {/* Summary completeness */}
                     <View style={styles.confidenceBox}>
                         <View style={styles.confRow}>
                             <View style={{ flex: 1 }}>
@@ -262,7 +251,6 @@ export default function BookDetailScreen({ navigation, route }) {
                         </View>
                     </View>
 
-                    {/* Action Buttons */}
                     <View style={styles.row}>
                         <TouchableOpacity
                             style={styles.btnPrimary}
@@ -273,10 +261,7 @@ export default function BookDetailScreen({ navigation, route }) {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={styles.btnSecondary}
-                            onPress={() => {
-                                setActiveTab('chapters');
-                                // Scroll to chapters — just switch tab
-                            }}
+                            onPress={() => setActiveTab('chapters')}
                         >
                             <Ionicons name="list-outline" size={15} color="#1a1a2e" />
                             <Text style={styles.btnSecondaryText}>By Chapter</Text>
@@ -325,7 +310,6 @@ export default function BookDetailScreen({ navigation, route }) {
                 {/* Tab Content */}
                 <View style={styles.tabContent}>
 
-                    {/* ── Overview ── */}
                     {activeTab === 'overview' && (
                         <View>
                             <Text style={styles.sectionTitle}>About this book</Text>
@@ -344,8 +328,6 @@ export default function BookDetailScreen({ navigation, route }) {
                                     ))}
                                 </View>
                             )}
-
-                            {/* Quick summary CTA */}
                             <TouchableOpacity
                                 style={styles.summaryPromo}
                                 onPress={() => navigation.navigate('Summary', { book, mode: 'full' })}
@@ -362,15 +344,12 @@ export default function BookDetailScreen({ navigation, route }) {
                         </View>
                     )}
 
-                    {/* ── Chapters ── */}
                     {activeTab === 'chapters' && (
                         <View>
                             <View style={styles.chaptersHeader}>
                                 <View>
                                     <Text style={styles.sectionTitle}>Chapters</Text>
-                                    <Text style={styles.bodyText}>
-                                        Tap any chapter for a unique AI summary.
-                                    </Text>
+                                    <Text style={styles.bodyText}>Tap any chapter for a unique AI summary.</Text>
                                 </View>
                                 {chaptersSource === 'ai' && (
                                     <View style={styles.aiSourceBadge}>
@@ -379,9 +358,7 @@ export default function BookDetailScreen({ navigation, route }) {
                                 )}
                                 {chaptersSource === 'library' && (
                                     <View style={[styles.aiSourceBadge, { backgroundColor: '#ecfdf5' }]}>
-                                        <Text style={[styles.aiSourceText, { color: '#059669' }]}>
-                                            From library
-                                        </Text>
+                                        <Text style={[styles.aiSourceText, { color: '#059669' }]}>From library</Text>
                                     </View>
                                 )}
                             </View>
@@ -389,12 +366,10 @@ export default function BookDetailScreen({ navigation, route }) {
                             {chaptersLoading ? (
                                 <View style={styles.chaptersLoader}>
                                     <ActivityIndicator size="small" color={COLORS.primary} />
-                                    <Text style={styles.chaptersLoaderText}>
-                                        Loading chapters...
-                                    </Text>
+                                    <Text style={styles.chaptersLoaderText}>Loading chapters...</Text>
                                 </View>
                             ) : (
-                                chapters.map((ch, i) => (
+                                chapters.map((ch) => (
                                     <TouchableOpacity
                                         key={ch.id}
                                         style={styles.chRow}
@@ -404,9 +379,7 @@ export default function BookDetailScreen({ navigation, route }) {
                                         <View style={styles.chNum}>
                                             <Text style={styles.chNumText}>{ch.num}</Text>
                                         </View>
-                                        <Text style={styles.chName} numberOfLines={2}>
-                                            {ch.title}
-                                        </Text>
+                                        <Text style={styles.chName} numberOfLines={2}>{ch.title}</Text>
                                         <View style={styles.chBadge}>
                                             <Text style={styles.chBadgeText}>{ch.confidence}%</Text>
                                         </View>
@@ -417,7 +390,6 @@ export default function BookDetailScreen({ navigation, route }) {
                         </View>
                     )}
 
-                    {/* ── Details ── */}
                     {activeTab === 'details' && (
                         <View>
                             {[
@@ -426,10 +398,7 @@ export default function BookDetailScreen({ navigation, route }) {
                                 { l: 'Author', v: book.author || '—' },
                                 { l: 'Year', v: book.year?.toString() || '—' },
                                 { l: 'Pages', v: book.pages?.toString() || '—' },
-                                {
-                                    l: 'Rating',
-                                    v: book.rating && book.rating !== '—' ? `${book.rating}/5` : '—',
-                                },
+                                { l: 'Rating', v: book.rating && book.rating !== '—' ? `${book.rating}/5` : '—' },
                             ].map((d, i) => (
                                 <View key={i} style={styles.detailRow}>
                                     <Text style={styles.detailLabel}>{d.l}</Text>
@@ -446,31 +415,23 @@ export default function BookDetailScreen({ navigation, route }) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
-
     hero: { height: 210, justifyContent: 'center', alignItems: 'center', position: 'relative' },
     backBtn: {
         position: 'absolute', top: 50, left: 16,
         width: 36, height: 36, borderRadius: 18,
-        backgroundColor: 'rgba(0,0,0,0.28)',
-        alignItems: 'center', justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.28)', alignItems: 'center', justifyContent: 'center',
     },
     heartBtn: {
         position: 'absolute', top: 50, right: 16,
         width: 36, height: 36, borderRadius: 18,
-        backgroundColor: 'rgba(0,0,0,0.28)',
-        alignItems: 'center', justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.28)', alignItems: 'center', justifyContent: 'center',
     },
     heroContent: { paddingTop: 28, alignItems: 'center' },
     coverWrap: {
         width: 110, height: 155, borderRadius: 10, overflow: 'hidden',
-        elevation: 8,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+        elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.5, shadowRadius: 14,
     },
     coverImg: { width: '100%', height: '100%' },
@@ -479,36 +440,28 @@ const styles = StyleSheet.create({
         alignItems: 'center', justifyContent: 'center',
     },
     coverLetter: { fontSize: 48, fontWeight: '700', color: 'rgba(255,255,255,0.3)' },
-
     info: { padding: 20 },
     title: { fontSize: 20, fontWeight: '700', color: '#111827', marginBottom: 4 },
     author: { fontSize: 14, color: '#6b7280', marginBottom: 12 },
-
     pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
     pill: {
-        flexDirection: 'row', alignItems: 'center',
-        backgroundColor: '#fff', borderRadius: 20,
-        paddingHorizontal: 10, paddingVertical: 5,
+        flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+        borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
         borderWidth: 0.5, borderColor: '#e5e7eb',
     },
     pillText: { fontSize: 11, color: '#6b7280', fontWeight: '500' },
     pillGreen: { backgroundColor: '#ecfdf5', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
     pillGreenText: { fontSize: 11, color: '#059669', fontWeight: '600' },
-
     confidenceBox: {
         backgroundColor: '#fff', borderRadius: 12, padding: 16,
         marginBottom: 16, borderWidth: 0.5, borderColor: '#e5e7eb',
     },
-    confRow: {
-        flexDirection: 'row', justifyContent: 'space-between',
-        alignItems: 'flex-start', marginBottom: 10,
-    },
+    confRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
     confTitle: { fontSize: 13, fontWeight: '600', color: '#111827', marginBottom: 3 },
     confSub: { fontSize: 11, color: '#9ca3af' },
     confValue: { fontSize: 22, fontWeight: '700', color: '#10b981' },
     confTrack: { height: 6, backgroundColor: '#e5e7eb', borderRadius: 3 },
     confFill: { height: 6, backgroundColor: '#10b981', borderRadius: 3 },
-
     row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
     btnPrimary: {
         flex: 1, backgroundColor: '#1a1a2e', borderRadius: 11, padding: 13,
@@ -531,25 +484,20 @@ const styles = StyleSheet.create({
         padding: 12, borderRadius: 11, borderWidth: 1, borderColor: '#d1d5db',
     },
     btnSaveText: { fontSize: 13, fontWeight: '600', color: '#1a1a2e' },
-
     tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 0.5, borderTopColor: '#e5e7eb',
-        borderBottomWidth: 0.5, borderBottomColor: '#e5e7eb',
-        backgroundColor: '#fff',
+        flexDirection: 'row', borderTopWidth: 0.5, borderTopColor: '#e5e7eb',
+        borderBottomWidth: 0.5, borderBottomColor: '#e5e7eb', backgroundColor: '#fff',
     },
     tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
     tabActive: { borderBottomWidth: 2, borderBottomColor: '#1a1a2e' },
     tabText: { fontSize: 13, color: '#9ca3af', fontWeight: '500' },
     tabTextActive: { color: '#1a1a2e', fontWeight: '700' },
-
     tabContent: { padding: 20 },
     sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 },
     bodyText: { fontSize: 13, color: '#6b7280', lineHeight: 21, marginBottom: 14 },
     tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 16 },
     tag: { backgroundColor: '#f1f5f9', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
     tagText: { fontSize: 11, color: '#64748b' },
-
     summaryPromo: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         backgroundColor: '#f0eeff', borderRadius: 12, padding: 14,
@@ -558,7 +506,6 @@ const styles = StyleSheet.create({
     summaryPromoLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
     summaryPromoTitle: { fontSize: 13, fontWeight: '700', color: '#1a1a2e', marginBottom: 2 },
     summaryPromoSub: { fontSize: 11, color: '#6b7280' },
-
     chaptersHeader: {
         flexDirection: 'row', alignItems: 'flex-start',
         justifyContent: 'space-between', marginBottom: 4,
@@ -573,7 +520,6 @@ const styles = StyleSheet.create({
         paddingVertical: 20, justifyContent: 'center',
     },
     chaptersLoaderText: { fontSize: 13, color: '#9ca3af' },
-
     chRow: {
         flexDirection: 'row', alignItems: 'center', gap: 12,
         backgroundColor: '#fff', padding: 14, borderRadius: 10,
@@ -581,14 +527,12 @@ const styles = StyleSheet.create({
     },
     chNum: {
         width: 28, height: 28, borderRadius: 14,
-        backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
+        backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
     },
     chNumText: { fontSize: 11, fontWeight: '700', color: '#6b7280' },
     chName: { flex: 1, fontSize: 13, fontWeight: '500', color: '#111827' },
     chBadge: { backgroundColor: '#ecfdf5', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
     chBadgeText: { fontSize: 10, color: '#10b981', fontWeight: '600' },
-
     detailRow: {
         flexDirection: 'row', justifyContent: 'space-between',
         paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: '#f1f5f9',

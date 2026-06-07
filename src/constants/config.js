@@ -1,2 +1,1 @@
-import appJson from '../../app.json';
-export const GROK_KEY = appJson.expo.extra.grokKey;
+export const GROK_KEY = process.env.EXPO_PUBLIC_GROK_API_KEY || '';
